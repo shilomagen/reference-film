@@ -79,7 +79,7 @@ test("actual schema-valid text to lyrics to plan chain uses independent adapter,
   assert.equal(loadedConfig.providers.text, "xai");
   assert.equal(loadedConfig.providers.video, "xai");
   assert.match(fs.readFileSync(path.join(directory, "lyrics.md"), "utf8"), /Edit lyrics.json/);
-  const loaded = loadProject(parseArgs(["validate", "--project", directory]), { checkFiles: false, environment: {} });
+  const loaded = loadProject(parseArgs(["validate", "--project", directory]), { environment: {} });
   assert.deepEqual(loaded.plan.allScenes.map((item) => item.scene_id), ["rain_bicycle", "small_star"]);
 });
 
