@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { isMain } from "../src/entrypoint.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const defaultDirectories = ["src", "scripts", "test"].map((directory) => path.join(projectRoot, directory));
@@ -38,7 +39,7 @@ export function checkJavaScriptSyntax(entries, { stdout = process.stdout, stderr
   return 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const entries = process.argv.length > 2 ? process.argv.slice(2).map((entry) => path.resolve(entry)) : defaultDirectories;
   process.exitCode = checkJavaScriptSyntax(entries);
 }

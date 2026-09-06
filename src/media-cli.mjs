@@ -1,7 +1,6 @@
 #!/usr/bin/env node
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import { loadProject, parseArgs } from "./config.mjs";
+import { isMain } from "./entrypoint.mjs";
 import { approveArtifact, approveMedia, reconcilePaidOperation, runMedia } from "./media.mjs";
 
 export function parseMediaArgs(argv) {
@@ -46,5 +45,4 @@ export async function main(argv = process.argv.slice(2), io = process) {
   return 0;
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (invokedDirectly) main().catch((error) => { process.stderr.write(`Error: ${error.message}\n`); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch((error) => { process.stderr.write(`Error: ${error.message}\n`); process.exitCode = 1; });
