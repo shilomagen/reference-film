@@ -33,6 +33,18 @@ test("xAI uses documented multi-reference payload and silent video", async () =>
   assert.equal(usageCostUsd({}), null);
 });
 
+test("configured text output budget is sent and bounded independently", async () => {
+  let body;
+  const client = createXaiProvider({
+    apiKey: "fake-xai-key", baseUrl: "http://127.0.0.1:45678/v1", testOrigins: ["http://127.0.0.1:45678"],
+    textMaxOutputTokens: 16000, retry: { retries: 0 },
+    fetch: async (_url, init) => { body = JSON.parse(init.body); return new Response(JSON.stringify({ choices: [{ message: { content: "ok" } }] }), { status: 200 }); },
+  });
+  await client.generateText({ model: "text", prompt: "long output" });
+  assert.equal(body.max_tokens, 16000);
+  assert.throws(() => createXaiProvider({ apiKey: "fake", textMaxOutputTokens: 32001 }), /1000 to 32000/);
+});
+
 test("text/judge schema fallback occurs only for explicit unsupported response format", async () => {
   let calls = 0;
   const client = provider(async () => {

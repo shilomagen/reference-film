@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +8,7 @@ import { approvalCurrent } from "../src/approvals.mjs";
 import { main } from "../src/cli.mjs";
 import { approveCreatorStage, briefFromAnswers, creatorStatus, generateLyrics, generateStoryboard, initializeCreatorProject, reconcileCreatorOperation, validateStoryboardSemantics } from "../src/creator.mjs";
 import { loadProject, parseArgs } from "../src/config.mjs";
-import { createPaidOperationJournal } from "../src/providers/journal.mjs";
+import { createPaidOperationJournal, PaidOperationResultUnavailableError } from "../src/providers/journal.mjs";
 
 const answers = [
   "Aiko | they/them | aiko",
@@ -42,7 +43,7 @@ function scene(id, lyricId, text, characters = ["aiko"]) {
 }
 const plan = { video: { title: "小さな星", description: "A lyric-linked film.", scenes: [scene("rain_bicycle", "verse_01_line_01", "雨の自転車を直したね"), scene("small_star", "chorus_01_line_01", "小さな星へ進もう")] } };
 
-function config() { return { models: { text: "independent-text-model" } }; }
+function config() { return { models: { text: "independent-text-model" }, generation: { textMaxOutputTokens: 12000 }, inputs: { faces: { aiko: [], mina: [] } } }; }
 
 test("six repeatable answers produce a meaningful consented Unicode brief and noninteractive init needs no plan", async () => {
   const brief = briefFromAnswers(answers, { projectSlug: "aiko-film" });
@@ -63,7 +64,7 @@ test("actual schema-valid text to lyrics to plan chain uses independent adapter,
   const directory = temp();
   const brief = briefFromAnswers(answers, { projectSlug: "aiko-film" });
   initializeCreatorProject({ projectDirectory: directory, brief });
-  approveCreatorStage({ projectDirectory: directory, stage: "disclosure", statement: "Explicit test disclosure" });
+  await approveCreatorStage({ projectDirectory: directory, stage: "disclosure", statement: "Explicit test disclosure" });
   const textAdapter = adapter([lyrics, plan]);
   const generatedLyrics = await generateLyrics({ projectDirectory: directory, config: config(), brief, yes: true, dependencies: { textAdapter } });
   assert.equal(generatedLyrics.lyrics.sections[0].lines[0].text, "雨の自転車を直したね");
@@ -71,7 +72,7 @@ test("actual schema-valid text to lyrics to plan chain uses independent adapter,
   const reused = await generateLyrics({ projectDirectory: directory, config: config(), brief, yes: true, dependencies: { textAdapter } });
   assert.equal(reused.reused, true);
   assert.equal(textAdapter.calls, 1);
-  approveCreatorStage({ projectDirectory: directory, stage: "lyrics", statement: "Lyrics reviewed" });
+  await approveCreatorStage({ projectDirectory: directory, stage: "lyrics", statement: "Lyrics reviewed" });
   const generatedPlan = await generateStoryboard({ projectDirectory: directory, config: config(), brief, lyrics, yes: true, dependencies: { textAdapter } });
   assert.equal(generatedPlan.plan.video.scenes[0].lyric_ids[0], "verse_01_line_01");
   assert.equal(textAdapter.calls, 2);
@@ -79,7 +80,7 @@ test("actual schema-valid text to lyrics to plan chain uses independent adapter,
   assert.equal(loadedConfig.providers.text, "xai");
   assert.equal(loadedConfig.providers.video, "xai");
   assert.match(fs.readFileSync(path.join(directory, "lyrics.md"), "utf8"), /Edit lyrics.json/);
-  const loaded = loadProject(parseArgs(["validate", "--project", directory]), { environment: {} });
+  const loaded = loadProject(parseArgs(["validate", "--project", directory]), { environment: {}, checkFiles: false });
   assert.deepEqual(loaded.plan.allScenes.map((item) => item.scene_id), ["rain_bicycle", "small_star"]);
 });
 
@@ -94,6 +95,52 @@ test("lyrics CLI does not load a missing scene plan", async () => {
   await main(["lyrics", "--project", directory, "--yes"], capture.io, { textAdapter, environment: {} });
   assert.equal(capture.json().lyrics.title, "小さな星");
   assert.equal(textAdapter.calls, 1);
+});
+
+test("root CLI completes creator to normalized media with config-only references and all gates", async () => {
+  const directory = temp();
+  const brief = briefFromAnswers(answers, { projectSlug: "aiko-film" });
+  initializeCreatorProject({ projectDirectory: directory, brief });
+  const reference = path.join(directory, "aiko.jpg");
+  const audio = path.join(directory, "song.wav");
+  fs.writeFileSync(reference, "synthetic-reference");
+  fs.writeFileSync(audio, "synthetic-audio");
+  const configPath = path.join(directory, "project.config.json");
+  const configured = JSON.parse(fs.readFileSync(configPath));
+  configured.inputs.faces.aiko = ["aiko.jpg"];
+  configured.inputs.audioCandidates = ["song.wav"];
+  configured.models.text = "test-text-model";
+  fs.writeFileSync(configPath, JSON.stringify(configured));
+  const textAdapter = adapter([lyrics, plan]);
+  let mediaCalls = 0;
+  const media = {
+    async approveMedia() {},
+    async runMedia(project) {
+      mediaCalls += 1;
+      assert.equal(project.plan.allScenes[0].scene_id, "rain_bicycle");
+      assert.equal(project.config.inputs.faces.aiko[0], reference);
+      assert.equal(project.config.audio, audio);
+      return { status: "injected-media-complete" };
+    },
+  };
+  const deps = { textAdapter, environment: {}, media };
+  let capture = sink();
+  await main(["create", "--project", directory, "--yes"], capture.io, deps);
+  assert.equal(mediaCalls, 0, "missing disclosure cannot spend");
+  await main(["approve", "--project", directory, "--stage", "disclosure", "--statement", "Consent"], sink().io, deps);
+  await main(["lyrics", "--project", directory, "--yes"], sink().io, deps);
+  await main(["approve", "--project", directory, "--stage", "lyrics", "--statement", "Lyrics"], sink().io, deps);
+  await main(["storyboard", "--project", directory, "--yes"], sink().io, deps);
+  await main(["approve", "--project", directory, "--stage", "scenes", "--statement", "Scenes"], sink().io, deps);
+  capture = sink();
+  await main(["create", "--project", directory, "--yes"], capture.io, deps);
+  assert.equal(mediaCalls, 0, "missing rights cannot spend");
+  await main(["approve-media", "--project", directory, "--acknowledge-rights", "--statement", "I own these inputs"], sink().io, deps);
+  capture = sink();
+  await main(["create", "--project", directory, "--yes"], capture.io, deps);
+  assert.equal(capture.json().status, "injected-media-complete");
+  assert.equal(mediaCalls, 1);
+  assert.equal(fs.existsSync(path.join(directory, ".private", "aiko-film", "outputs", "rights-approval.json")), true);
 });
 
 test("dry-run, no consent, no --yes, and no lyric approval make zero calls", async () => {
@@ -163,6 +210,50 @@ test("uncertain journal requires explicit reason and duplicate-risk acknowledgem
   const reused = await journal.run({ id: "uncertain-op", provider: "xai", operation: "text", model: "m", fingerprint: "f" }, async () => { calls += 1; });
   assert.equal(reused.reused, true);
   assert.equal(calls, 1);
+});
+
+test("init appends private workspace ignores and git confirms generated personal files are ignored", () => {
+  const root = temp();
+  fs.writeFileSync(path.join(root, ".gitignore"), "keep-me/\n");
+  const directory = path.join(root, "projects", "private-film");
+  initializeCreatorProject({ projectDirectory: directory, brief: briefFromAnswers(answers, { projectSlug: "aiko-film" }) });
+  assert.match(fs.readFileSync(path.join(directory, ".gitignore"), "utf8"), /brief\.json/);
+  assert.match(fs.readFileSync(path.join(directory, ".gitignore"), "utf8"), /\.private\//);
+  const initialized = spawnSync("git", ["init", "-q"], { cwd: root, encoding: "utf8" });
+  assert.equal(initialized.status, 0, initialized.stderr);
+  for (const name of ["brief.json", "project.config.json"]) {
+    const checked = spawnSync("git", ["check-ignore", path.relative(root, path.join(directory, name))], { cwd: root, encoding: "utf8" });
+    assert.equal(checked.status, 0, `${name}: ${checked.stderr}`);
+  }
+  assert.equal(fs.readFileSync(path.join(root, ".gitignore"), "utf8"), "keep-me/\n");
+});
+
+test("real text adapter journal uses generation epochs and blocks lost-result resubmission", async () => {
+  const directory = temp();
+  const brief = briefFromAnswers(answers, { projectSlug: "aiko-film" });
+  initializeCreatorProject({ projectDirectory: directory, brief });
+  await approveCreatorStage({ projectDirectory: directory, stage: "disclosure", statement: "Consent" });
+  let posts = 0;
+  const configured = {
+    ...config(), providers: { text: "xai", image: "xai", judge: "xai", video: "xai" },
+    credentials: { xaiApiKey: "fake", xaiBaseUrl: "http://127.0.0.1:45678/v1" },
+    generation: { textMaxOutputTokens: 12000, retry: { attempts: 0 } },
+  };
+  const dependencies = {
+    testOrigins: ["http://127.0.0.1:45678"], sleep: async () => {},
+    fetch: async (_url, init) => {
+      posts += 1;
+      assert.equal(JSON.parse(init.body).max_tokens, 12000);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(lyrics) } }], request_id: `text-${posts}` }), { status: 200 });
+    },
+  };
+  await generateLyrics({ projectDirectory: directory, config: configured, brief, yes: true, dependencies });
+  await generateLyrics({ projectDirectory: directory, config: configured, brief, yes: true, force: true, dependencies });
+  assert.equal(posts, 2, "force uses a new durable generation epoch even with an identical prompt");
+  for (const name of ["lyrics.json", "lyrics.md", "music-brief.md"]) fs.rmSync(path.join(directory, name));
+  const error = await generateLyrics({ projectDirectory: directory, config: configured, brief, yes: true, dependencies }).catch((caught) => caught);
+  assert.ok(error instanceof PaidOperationResultUnavailableError);
+  assert.equal(posts, 2, "a completed response with a lost artifact is never automatically resubmitted");
 });
 
 test("invalid artifacts and logs do not retain API keys or base64 URLs", async () => {

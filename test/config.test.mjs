@@ -65,7 +65,7 @@ test("config-owned paths resolve from config directory under external cwd", () =
 test("video provider override does not alter other capabilities", () => {
   const config = loadConfig(defaultOptions({ provider: "gemini" }));
   assert.deepEqual(config.providers, { text: "xai", image: "xai", judge: "xai", video: "gemini" });
-  assert.equal(config.models.geminiVideo, "example-gemini-video-model");
+  assert.equal(config.models.geminiVideo, "example-gemini-video-model-SETUP-REQUIRED");
 });
 
 test("environment is explicit, aliases work, model overrides are project scoped, and secrets do not serialize", () => {
@@ -145,6 +145,16 @@ test("schema and semantic validation reject unsafe IDs, durations, prompts and o
   const output = copyProject((config) => ({ ...config, outputs: "." }));
   assert.throws(() => loadConfig(defaultOptions({ config: output.configPath })), /outputs is unsafe/);
   fs.rmSync(output.directory, { recursive: true });
+});
+
+test("validated media generation settings are merged and bounded", () => {
+  const config = loadConfig(defaultOptions());
+  assert.equal(config.generation.textMaxOutputTokens, 12000);
+  assert.equal(config.generation.imageResolution, "2k");
+  assert.equal(config.generation.videoResolution, "720p");
+  const fixture = copyProject((value) => ({ ...value, generation: { ...value.generation, textMaxOutputTokens: 32001 } }));
+  assert.throws(() => loadConfig(defaultOptions({ config: fixture.configPath })), /textMaxOutputTokens.*<= 32000/s);
+  fs.rmSync(fixture.directory, { recursive: true });
 });
 
 test("unsupported provider capability fails before filesystem input checks", () => {

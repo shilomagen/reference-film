@@ -7,7 +7,7 @@ import { readJson, validateCanonical } from "./schema.mjs";
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DEFAULT_CONFIG_PATH = path.join(PROJECT_ROOT, "examples", "project.config.json");
-export const COMMANDS = Object.freeze(["init", "lyrics", "storyboard", "approve", "create", "reconcile", "run", "images", "videos", "assemble", "status", "validate"]);
+export const COMMANDS = Object.freeze(["init", "lyrics", "storyboard", "approve", "approve-media", "approve-artifact", "create", "reconcile", "reconcile-media", "run", "images", "videos", "assemble", "status", "validate"]);
 
 export const HELP = `Reference Film offline CLI
 
@@ -19,8 +19,11 @@ Commands:
   lyrics      Generate schema-valid editable lyrics (one text request)
   storyboard Generate scenes from approved lyrics (one text request)
   approve     Record disclosure, lyrics, scenes, or media-rights approval
+  approve-media Bridge current normalized media hashes into both rights gates
+  approve-artifact Manually accept a no-judge image/video candidate checksum
   create      Resume the gated creator workflow, stopping for human review
-  reconcile   Authorize one retry for an uncertain paid operation
+  reconcile   Authorize one retry for an uncertain creator text operation
+  reconcile-media Authorize one retry for an uncertain media operation
   validate    Validate contracts and local paths (offline by default)
   status      Report local artifact status
   run         Run media stages (or compile the existing plan with --dry-run)
@@ -46,6 +49,8 @@ Options:
   --stage <name>        Approval stage: disclosure, lyrics, scenes, rights
   --statement <text>    Explicit local approval statement
   --acknowledge-rights  Attest rights for current media file hashes
+  --scene <id>          Scene for approve-artifact
+  --checksum <sha256>   Exact candidate checksum for approve-artifact
   --operation <id>      Paid journal operation to reconcile
   --reason <text>       Reconciliation reason
   --acknowledge-duplicate-risk  Permit exactly one uncertain-operation retry
@@ -86,6 +91,8 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
     stage: null,
     statement: null,
     acknowledgeRights: false,
+    scene: null,
+    checksum: null,
     operation: null,
     reason: null,
     acknowledgeDuplicateRisk: false,
@@ -106,7 +113,7 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
       options[key] = fromCwd(valueAfter(argv, index, arg), cwd);
       if (arg === "--config") options.configExplicit = true;
       index += 1;
-    } else if (["--stage", "--statement", "--operation", "--reason"].includes(arg)) {
+    } else if (["--stage", "--statement", "--scene", "--checksum", "--operation", "--reason"].includes(arg)) {
       options[arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = valueAfter(argv, index, arg);
       index += 1;
     } else if (arg === "--provider") {
@@ -321,6 +328,7 @@ function validateUniqueDocumentIds(lyrics, timings, plan) {
 }
 
 export function validateLocalInputs(config, plan) {
+  if (Object.values(config.inputs.faces).flat().length === 0) throw new Error("At least one character reference is required before media validation or generation");
   for (const [character, references] of Object.entries(config.inputs.faces)) {
     for (const [index, filePath] of references.entries()) assertExistingFile(filePath, `face reference ${character}[${index}]`);
   }

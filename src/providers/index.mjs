@@ -67,6 +67,7 @@ export function createProviderRegistry(config = {}, dependencies = {}) {
         baseUrl: credentials.baseUrl,
         retry: providerRetry(config),
         journal: dependencies.journal,
+        textMaxOutputTokens: config.generation?.textMaxOutputTokens,
         fetch: dependencies.fetch,
         sleep: dependencies.sleep,
         random: dependencies.random,

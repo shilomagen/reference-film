@@ -23,10 +23,17 @@
   "outputs": "../.generated/example-film",
   "providers": { "text": "xai", "image": "xai", "judge": "xai", "video": "xai" },
   "models": {
-    "text": "example-text-model",
-    "image": "example-image-model",
-    "judge": "example-judge-model",
-    "video": "example-video-model",
-    "geminiVideo": "example-gemini-video-model"
+    "text": "example-text-model-SETUP-REQUIRED",
+    "image": "example-image-model-SETUP-REQUIRED",
+    "judge": "example-judge-model-SETUP-REQUIRED",
+    "video": "example-video-model-SETUP-REQUIRED",
+    "geminiVideo": "example-gemini-video-model-SETUP-REQUIRED"
+  },
+  "generation": {
+    "textMaxOutputTokens": 12000,
+    "imageResolution": "2k",
+    "imageQuality": "medium",
+    "videoResolution": "720p",
+    "videoAudioPolicy": "disabled"
   }
 }

@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { approvalCurrent, approvalStatus, approveContent, approveMediaRights, readApproval } from "./approvals.mjs";
 import { compileLyricsPrompt, compileStoryboardPrompt, lyricsContract, storyboardContract } from "./creative-prompts.mjs";
 import { objectHash, readJson, sanitizeMetadata, writeJson } from "./io.mjs";
+import { approveMedia } from "./media.mjs";
 import { createProviderRegistry } from "./providers/index.mjs";
 import { createPaidOperationJournal } from "./providers/journal.mjs";
 import { validateCanonical } from "./schema.mjs";
@@ -13,6 +14,11 @@ export const CREATOR_FILES = Object.freeze({
   brief: "brief.json", lyrics: "lyrics.json", lyricsPreview: "lyrics.md", musicBrief: "music-brief.md",
   plan: "scene-plan.json", config: "project.config.json",
 });
+
+const PRIVATE_IGNORE_ENTRIES = Object.freeze([
+  ".private/", "brief.json", "lyrics.json", "lyrics.md", "music-brief.md", "scene-plan.json", "project.config.json", "workflow/",
+]);
+const BLOCKING_OPERATION_STATES = new Set(["submission_started", "accepted", "uncertain", "retry_authorized"]);
 
 function splitList(value) {
   return String(value ?? "").split(/\s*[;|]\s*/u).map((item) => item.trim()).filter(Boolean);
@@ -105,11 +111,21 @@ function characterEntries(brief) {
   return [brief.subject, ...brief.supporting_characters];
 }
 
+function ensurePrivateGitignore(projectDirectory) {
+  const target = path.join(projectDirectory, ".gitignore");
+  const existing = fs.existsSync(target) ? fs.readFileSync(target, "utf8") : "";
+  const lines = new Set(existing.split(/\r?\n/).map((line) => line.trim()));
+  const additions = PRIVATE_IGNORE_ENTRIES.filter((entry) => !lines.has(entry));
+  if (!additions.length) return;
+  const prefix = existing && !existing.endsWith("\n") ? "\n" : "";
+  fs.appendFileSync(target, `${prefix}${existing ? "\n" : ""}# Reference Film private creator workspace\n${additions.join("\n")}\n`, { mode: 0o600 });
+}
+
 function generatedConfig(brief) {
   const characters = Object.fromEntries(characterEntries(brief).map((person) => [person.character_id, {
     description: `${person.display_name}${person.pronouns ? ` (${person.pronouns})` : ""}. ${person.relationship ?? "Primary subject"}.`,
   }]));
-  const faces = Object.fromEntries(characterEntries(brief).map((person) => [person.character_id, person.reference_files]));
+  const faces = Object.fromEntries(characterEntries(brief).map((person) => [person.character_id, []]));
   return {
     metadata: { slug: brief.project_slug, title: `Film for ${brief.subject.display_name}`, description: brief.intended_message },
     visualStyle: "Cinematic, coherent, respectful, natural light, no visible text, and only supplied identity facts.",
@@ -117,7 +133,8 @@ function generatedConfig(brief) {
     inputs: { plan: CREATOR_FILES.plan, brief: CREATOR_FILES.brief, lyrics: CREATOR_FILES.lyrics, faces, audioCandidates: [] },
     outputs: path.join(".private", brief.project_slug, "outputs"),
     providers: { text: "xai", image: "xai", judge: "xai", video: "xai" },
-    models: { text: "grok-text", image: "grok-imagine-image", judge: "grok-vision", video: "grok-imagine-video", geminiVideo: "veo-fast" },
+    models: { text: "SET_ME_XAI_TEXT_MODEL", image: "SET_ME_XAI_IMAGE_MODEL", judge: "SET_ME_XAI_JUDGE_MODEL", video: "SET_ME_XAI_VIDEO_MODEL", geminiVideo: "SET_ME_GEMINI_VIDEO_MODEL" },
+    generation: { textMaxOutputTokens: 12000, imageResolution: "2k", imageQuality: "medium", videoResolution: "720p", videoAudioPolicy: "disabled" },
   };
 }
 
@@ -125,6 +142,7 @@ export function initializeCreatorProject({ projectDirectory, brief, force = fals
   validateCanonical("brief", brief, "creator brief");
   const paths = creatorPaths(projectDirectory);
   fs.mkdirSync(path.resolve(projectDirectory), { recursive: true });
+  ensurePrivateGitignore(path.resolve(projectDirectory));
   ensureNew(paths.brief, force);
   ensureNew(paths.config, force);
   writeJson(paths.brief, brief);
@@ -182,7 +200,7 @@ function lyricIndex(lyrics) {
   return { list, byId: new Map(list.map((line) => [line.line_id, line])), repeatable };
 }
 
-export function validateStoryboardSemantics(plan, { lyrics, characterIds, allowedSourceFiles = [] }) {
+export function validateStoryboardSemantics(plan, { lyrics, characterIds, allowedSourceFiles = [], sourceRoot = process.cwd() }) {
   validateCanonical("plan", plan, "scene plan");
   if (plan.video.scenes.length > 120) throw new Error("Storyboard exceeds 120 scenes");
   const knownCharacters = new Set(characterIds);
@@ -197,7 +215,7 @@ export function validateStoryboardSemantics(plan, { lyrics, characterIds, allowe
     for (const id of scene.characters) if (!knownCharacters.has(id)) throw new Error(`Scene '${scene.scene_id}' references unknown character '${id}'`);
     if (scene.source_image) {
       if (scene.source_image_mode !== "direct_animation") throw new Error(`Scene '${scene.scene_id}' source_image requires direct_animation`);
-      if (!allowedFiles.has(path.resolve(scene.source_image))) throw new Error(`Scene '${scene.scene_id}' invented or unauthorized source_image`);
+      if (!allowedFiles.has(path.resolve(sourceRoot, scene.source_image))) throw new Error(`Scene '${scene.scene_id}' invented or unauthorized source_image`);
     }
     const expectedText = scene.lyric_ids.map((id) => {
       if (!byId.has(id)) throw new Error(`Scene '${scene.scene_id}' references unknown lyric_id '${id}'`);
@@ -235,6 +253,43 @@ function workflowJournal(projectDirectory) {
   return createPaidOperationJournal(path.join(projectDirectory, "workflow", "journal"));
 }
 
+function provenancePath(projectDirectory, stage) {
+  return path.join(projectDirectory, "workflow", "provenance", `${stage}.json`);
+}
+
+function generationEpoch(projectDirectory, stage, force) {
+  const previous = readJson(provenancePath(projectDirectory, stage), null);
+  return force ? Number(previous?.generation_epoch ?? 0) + 1 : Number(previous?.generation_epoch ?? 1);
+}
+
+function stageFingerprint(stage, { config, prompt, brief, lyrics = null }) {
+  return objectHash({ version: 1, stage, model: config.models.text, prompt, brief, lyrics, maxOutputTokens: config.generation?.textMaxOutputTokens ?? null });
+}
+
+function currentProvenance(projectDirectory, stage, fingerprint, artifact) {
+  const provenance = readJson(provenancePath(projectDirectory, stage), null);
+  return Boolean(provenance?.fingerprint === fingerprint && provenance?.artifact_hash === objectHash(artifact));
+}
+
+function writeProvenance(projectDirectory, stage, { fingerprint, epoch, artifact, model }) {
+  writeJson(provenancePath(projectDirectory, stage), {
+    version: 1, stage, fingerprint, generation_epoch: epoch, artifact_hash: objectHash(artifact), model,
+    recorded_at: new Date().toISOString(),
+  });
+}
+
+function assertNoUnresolvedCreatorOperations(projectDirectory) {
+  const directory = path.join(projectDirectory, "workflow", "journal");
+  if (!fs.existsSync(directory)) return;
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith(".json")) continue;
+    const entry = readJson(path.join(directory, name), null);
+    if (entry && BLOCKING_OPERATION_STATES.has(entry.state)) {
+      throw new Error(`Paid operation ${entry.id} is ${entry.state}; resolve or explicitly reconcile it before --force regeneration.`);
+    }
+  }
+}
+
 function textRegistry(config, dependencies, projectDirectory) {
   if (dependencies.textAdapter) return { text: dependencies.textAdapter, models: { text: config.models.text } };
   return createProviderRegistry(config, { ...dependencies, journal: dependencies.journal ?? workflowJournal(projectDirectory) });
@@ -251,8 +306,13 @@ function lyricsApprovalCurrent(projectDirectory, brief, lyrics) {
 
 function scenesApprovalCurrent(projectDirectory, brief, lyrics, plan) {
   const approval = readApproval(projectDirectory, "scenes");
-  return lyricsApprovalCurrent(projectDirectory, brief, lyrics) && approvalCurrent(projectDirectory, "scenes", plan)
+  const document = plan.video ? plan : { video: { title: plan.title, ...(plan.description === undefined ? {} : { description: plan.description }), scenes: plan.allScenes } };
+  return lyricsApprovalCurrent(projectDirectory, brief, lyrics) && approvalCurrent(projectDirectory, "scenes", document)
     && approval?.brief_hash === objectHash(brief) && approval?.lyrics_hash === objectHash(lyrics);
+}
+
+function requireConfiguredTextModel(config) {
+  if (/^(?:example-|SET_ME_)/i.test(config.models.text)) throw new Error("Configure a real text model before a paid request; example/SET_ME model names are placeholders and offline validation does not check provider availability.");
 }
 
 function requireSpendAndDisclosure(projectDirectory, brief, yes, spendDetails) {
@@ -270,18 +330,23 @@ function outputJson(result) {
 export async function generateLyrics({ projectDirectory, config, brief, yes = false, dryRun = false, force = false, dependencies = {} }) {
   const paths = creatorPaths(projectDirectory);
   const prompt = compileLyricsPrompt(brief);
-  if (dryRun) return { dryRun: true, networkCalls: 0, estimatedTextRequests: 1, estimatedCost: "unknown", prompt, schema: lyricsContract().value, output: paths.lyrics };
+  const fingerprint = stageFingerprint("lyrics", { config, prompt, brief });
+  if (dryRun) return { dryRun: true, networkCalls: 0, estimatedTextRequests: 1, estimatedCost: "unknown", prompt, fingerprint, schema: lyricsContract().value, output: paths.lyrics };
   requireSpendAndDisclosure(projectDirectory, brief, yes, { stage: "lyrics", model: config.models.text, prompt_hash: objectHash(prompt), estimated_requests: 1, estimated_cost: "unknown" });
+  if (!dependencies.textAdapter) requireConfiguredTextModel(config);
   if (fs.existsSync(paths.lyrics) && !force) {
     const lyrics = validateLyricsSemantics(readJson(paths.lyrics));
+    if (!currentProvenance(projectDirectory, "lyrics", fingerprint, lyrics)) throw new Error("Existing lyrics.json is an editable draft but does not match the current brief, prompt, model, or recorded content. Review it and approve it manually, or regenerate with --force.");
     return { reused: true, lyrics };
   }
   ensureNew(paths.lyrics, force);
-  if (force && !previewsCanBeReplaced(paths)) throw new Error("Refusing to overwrite an edited lyrics.md or music-brief.md preview");
+  if ((force || fs.existsSync(paths.lyricsPreview) || fs.existsSync(paths.musicBrief)) && !previewsCanBeReplaced(paths)) throw new Error("Refusing to overwrite an edited lyrics.md or music-brief.md preview");
+  if (force) assertNoUnresolvedCreatorOperations(projectDirectory);
+  const epoch = generationEpoch(projectDirectory, "lyrics", force);
   const registry = textRegistry(config, dependencies, projectDirectory);
   let value;
   try {
-    value = outputJson(await registry.text.generateText({ model: registry.models.text, prompt, schema: lyricsContract() }));
+    value = outputJson(await registry.text.generateText({ model: registry.models.text, prompt, schema: lyricsContract(), operationKey: `creator/lyrics/${fingerprint}/generation-${epoch}` }));
     validateLyricsSemantics(value);
   } catch (error) {
     error.invalidArtifact = saveInvalid(projectDirectory, "lyrics", value ?? null, error, Object.values(config.credentials ?? {}));
@@ -290,37 +355,44 @@ export async function generateLyrics({ projectDirectory, config, brief, yes = fa
   writeJson(paths.lyrics, value);
   writeTextAtomic(paths.lyricsPreview, renderLyricsMarkdown(value));
   writeTextAtomic(paths.musicBrief, renderMusicBrief(value));
+  writeProvenance(projectDirectory, "lyrics", { fingerprint, epoch, artifact: value, model: config.models.text });
   return { reused: false, lyrics: value };
 }
 
 export async function generateStoryboard({ projectDirectory, config, brief, lyrics, yes = false, dryRun = false, force = false, dependencies = {} }) {
   const paths = creatorPaths(projectDirectory);
-  const suppliedSourceFiles = characterEntries(brief).flatMap((person) => person.reference_files).map((file) => path.resolve(projectDirectory, file));
+  const suppliedSourceFiles = Object.values(config.inputs.faces ?? {}).flat().map((file) => path.resolve(file));
   const characters = characterEntries(brief).map(({ character_id, display_name, pronouns, relationship }) => ({ character_id, display_name, pronouns, relationship }));
   const prompt = compileStoryboardPrompt({ brief, lyrics, characters, suppliedSourceFiles });
-  if (dryRun) return { dryRun: true, networkCalls: 0, estimatedTextRequests: 1, estimatedCost: "unknown", prompt, schema: storyboardContract().value, output: paths.plan };
+  const fingerprint = stageFingerprint("storyboard", { config, prompt, brief, lyrics });
+  if (dryRun) return { dryRun: true, networkCalls: 0, estimatedTextRequests: 1, estimatedCost: "unknown", prompt, fingerprint, schema: storyboardContract().value, output: paths.plan };
   if (!lyricsApprovalCurrent(projectDirectory, brief, lyrics)) throw new Error("Current lyrics require editorial approval tied to the current brief. Run approve --stage lyrics.");
+  if (!dependencies.textAdapter) requireConfiguredTextModel(config);
   if (!yes) throw new Error("Storyboard generation is a potentially paid request with unknown cost. Re-run with --yes to acknowledge spend.");
   approveContent(projectDirectory, "spend", { stage: "storyboard", model: config.models.text, prompt_hash: objectHash(prompt), estimated_requests: 1, estimated_cost: "unknown" }, { statement: "Acknowledged potentially paid text request with unknown cost.", metadata: { stage: "storyboard" } });
   if (fs.existsSync(paths.plan) && !force) {
-    const plan = validateStoryboardSemantics(readJson(paths.plan), { lyrics, characterIds: characters.map((item) => item.character_id), allowedSourceFiles: suppliedSourceFiles });
+    const plan = validateStoryboardSemantics(readJson(paths.plan), { lyrics, characterIds: characters.map((item) => item.character_id), allowedSourceFiles: suppliedSourceFiles, sourceRoot: projectDirectory });
+    if (!currentProvenance(projectDirectory, "storyboard", fingerprint, plan)) throw new Error("Existing scene-plan.json is an editable draft but does not match the current brief, lyrics, prompt, model, or recorded content. Review and approve it manually, or regenerate with --force.");
     return { reused: true, plan };
   }
   ensureNew(paths.plan, force);
+  if (force) assertNoUnresolvedCreatorOperations(projectDirectory);
+  const epoch = generationEpoch(projectDirectory, "storyboard", force);
   const registry = textRegistry(config, dependencies, projectDirectory);
   let value;
   try {
-    value = outputJson(await registry.text.generateText({ model: registry.models.text, prompt, schema: storyboardContract() }));
-    validateStoryboardSemantics(value, { lyrics, characterIds: characters.map((item) => item.character_id), allowedSourceFiles: suppliedSourceFiles });
+    value = outputJson(await registry.text.generateText({ model: registry.models.text, prompt, schema: storyboardContract(), operationKey: `creator/storyboard/${fingerprint}/generation-${epoch}` }));
+    validateStoryboardSemantics(value, { lyrics, characterIds: characters.map((item) => item.character_id), allowedSourceFiles: suppliedSourceFiles, sourceRoot: projectDirectory });
   } catch (error) {
     error.invalidArtifact = saveInvalid(projectDirectory, "storyboard", value ?? null, error, Object.values(config.credentials ?? {}));
     throw error;
   }
   writeJson(paths.plan, value);
+  writeProvenance(projectDirectory, "storyboard", { fingerprint, epoch, artifact: value, model: config.models.text });
   return { reused: false, plan: value };
 }
 
-export function approveCreatorStage({ projectDirectory, stage, acknowledgeRights = false, statement = "Approved after local review." }) {
+export async function approveCreatorStage({ projectDirectory, stage, acknowledgeRights = false, statement = "Approved after local review.", config = null, plan = null }) {
   const paths = creatorPaths(projectDirectory);
   if (stage === "disclosure") {
     const brief = validateCanonical("brief", readJson(paths.brief), "creator brief");
@@ -336,16 +408,21 @@ export function approveCreatorStage({ projectDirectory, stage, acknowledgeRights
     const brief = validateCanonical("brief", readJson(paths.brief), "creator brief");
     const lyrics = validateLyricsSemantics(readJson(paths.lyrics));
     const plan = readJson(paths.plan);
-    validateStoryboardSemantics(plan, { lyrics, characterIds: characterEntries(brief).map((item) => item.character_id), allowedSourceFiles: characterEntries(brief).flatMap((item) => item.reference_files).map((file) => path.resolve(projectDirectory, file)) });
+    validateStoryboardSemantics(plan, { lyrics, characterIds: characterEntries(brief).map((item) => item.character_id), allowedSourceFiles: config ? Object.values(config.inputs.faces).flat() : characterEntries(brief).flatMap((item) => item.reference_files).map((file) => path.resolve(projectDirectory, file)), sourceRoot: projectDirectory });
     if (!lyricsApprovalCurrent(projectDirectory, brief, lyrics)) throw new Error("Approve lyrics tied to the current brief before scenes");
     return approveContent(projectDirectory, "scenes", plan, { statement, metadata: { brief_hash: objectHash(brief), lyrics_hash: objectHash(lyrics) } });
   }
   if (stage === "rights") {
     if (!acknowledgeRights) throw new Error("Media rights approval requires --acknowledge-rights");
-    const brief = validateCanonical("brief", readJson(paths.brief), "creator brief");
-    const config = readJson(paths.config);
-    const files = [...characterEntries(brief).flatMap((item) => item.reference_files), ...(config.inputs.audioCandidates ?? [])].map((file) => path.resolve(projectDirectory, file));
-    return approveMediaRights(projectDirectory, files, { statement });
+    if (!config || !plan) throw new Error("Rights approval requires the complete normalized project; supply a valid config, plan, references, direct photos, and selected audio.");
+    const files = [
+      ...Object.values(config.inputs.faces).flat(),
+      ...plan.allScenes.flatMap((scene) => scene.source_image ? [scene.source_image] : []),
+      ...(config.audio ? [config.audio] : []),
+    ];
+    const mediaApproval = await approveMedia({ config, plan, acknowledgeRights: true });
+    const creatorApproval = approveMediaRights(projectDirectory, files, { statement });
+    return { creatorApproval, mediaApproval };
   }
   throw new Error("--stage must be disclosure, lyrics, scenes, or rights");
 }
@@ -360,13 +437,19 @@ export function creatorStatus(projectDirectory) {
   const brief = readJson(paths.brief, null);
   const lyrics = readJson(paths.lyrics, null);
   const plan = readJson(paths.plan, null);
+  const config = readJson(paths.config, null);
+  const configuredFiles = config ? [
+    ...Object.values(config.inputs?.faces ?? {}).flat().map((file) => path.resolve(projectDirectory, file)),
+    ...(plan?.video?.scenes ?? []).flatMap((scene) => scene.source_image ? [path.resolve(projectDirectory, scene.source_image)] : []),
+    ...(config.inputs?.audioCandidates ?? []).map((file) => path.resolve(projectDirectory, file)).filter((file) => fs.existsSync(file)),
+  ] : [];
   return {
     files: Object.fromEntries(Object.entries(paths).map(([key, file]) => [key, fs.existsSync(file)])),
     approvals: {
       disclosure: brief ? disclosureCurrent(projectDirectory, brief) : false,
       lyrics: brief && lyrics ? lyricsApprovalCurrent(projectDirectory, brief, lyrics) : false,
       scenes: brief && lyrics && plan ? scenesApprovalCurrent(projectDirectory, brief, lyrics, plan) : false,
-      media_rights: approvalStatus(projectDirectory).media_rights,
+      media_rights: configuredFiles.length > 0 && configuredFiles.every((file) => fs.existsSync(file)) ? approvalStatus(projectDirectory, { mediaFiles: configuredFiles }).media_rights : false,
     },
     spendAcknowledgement: readApproval(projectDirectory, "spend"),
   };
@@ -391,12 +474,21 @@ export async function coordinateCreate(options) {
   }
   const plan = readJson(paths.plan);
   if (!scenesApprovalCurrent(options.projectDirectory, brief, lyrics, plan)) return { stop: "Review the current scene-plan.json and run approve --stage scenes." };
-  const mediaFiles = characterEntries(brief).flatMap((item) => item.reference_files).map((file) => path.resolve(options.projectDirectory, file));
-  const audio = (options.config.inputs.audioCandidates ?? []).map((file) => path.resolve(path.dirname(options.config.configPath), file)).find((file) => fs.existsSync(file));
+  const mediaFiles = Object.values(options.config.inputs.faces ?? {}).flat();
+  const directPhotos = plan.video.scenes.flatMap((scene) => scene.source_image ? [path.resolve(path.dirname(paths.plan), scene.source_image)] : []);
+  const audio = options.config.audio;
   if (!audio && !options.allowSilent) return { stop: "Supply a finished licensed song in project.config.json inputs.audioCandidates. Use --allow-silent only for an explicit preview." };
-  if (!mediaFiles.length || !mediaFiles.every((file) => fs.existsSync(file))) return { stop: "Supply and validate every local character reference path before media generation." };
-  if (!approvalStatus(options.projectDirectory, { mediaFiles: [...mediaFiles, ...(audio ? [audio] : [])] }).media_rights) return { stop: "Attest current file hashes with approve --stage rights --acknowledge-rights." };
+  if (!mediaFiles.length || !mediaFiles.every((file) => fs.existsSync(file)) || !directPhotos.every((file) => fs.existsSync(file))) return { stop: "Supply and validate at least one local character reference and every direct-photo path before media generation." };
+  if (!approvalStatus(options.projectDirectory, { mediaFiles: [...mediaFiles, ...directPhotos, ...(audio ? [audio] : [])] }).media_rights) return { stop: "Attest current file hashes with approve --stage rights --acknowledge-rights." };
   return { readyForMedia: true, plan };
+}
+
+export function requireCreatorEditorialApprovals(projectDirectory, { brief, lyrics, plan }) {
+  if (!brief || !lyrics) return false;
+  if (!scenesApprovalCurrent(projectDirectory, brief, lyrics, plan)) {
+    throw new Error("Creator-originated media requires current disclosure, lyrics, and scene approvals; --yes cannot bypass editorial approval.");
+  }
+  return true;
 }
 
 export function creatorFingerprint(value) { return objectHash(value); }

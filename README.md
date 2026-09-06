@@ -1,72 +1,141 @@
 # Reference Film
 
-A local-first, provider-extensible CLI for creating reference-driven films. This first
-slice publishes the project contracts and an offline validator/dry run. Paid image,
-video, judging, and assembly stages are deliberately not implemented yet.
+Reference Film is a local-first CLI for turning a reviewed creator brief and supplied,
+licensed media into a short reference-driven film. It includes creator onboarding,
+structured text generation, explicit editorial and rights gates, resumable image/video
+operations, QA, and FFmpeg assembly.
 
-## Offline bootstrap
+> **Important:** this project does **not** synthesize singing or music. Supply a finished,
+> properly licensed audio file. Model names in the synthetic example are placeholders;
+offline validation does not prove that a provider or model is available.
 
-Requires Node.js 20+ and FFmpeg on `PATH`.
+## Install and offline example
+
+Requires Node.js 20+ and FFmpeg/ffprobe on `PATH`.
 
 ```sh
 npm install --ignore-scripts
-npm run example:assets
+npm run example:assets       # synthetic PNGs and a 20-second WAV
 npm test
-npm run validate
-npm run dry-run
+npm run validate             # real media validator; no network or credentials
+npm run dry-run              # real timeline/prompts/paths; no network or credentials
 ```
 
-`npm install` has no runtime dependencies or install scripts. Validation and dry-run
-do not load `.env`, require credentials, or make network calls. The default config is
-`examples/project.config.json`; generated synthetic assets and project outputs are
-Git-ignored.
+The default example is wholly synthetic. Its 18 seconds of scenes plus a 2-second final
+freeze match the generated 20-second audio. `examples/assets/` and generated output are
+ignored; public example JSON and documentation remain tracked.
 
-To run from another working directory, provide an explicit config path:
+## Creator onboarding and end-to-end flow
+
+Create workspaces under the ignored `projects/` directory. Interactive `init` asks six
+questions and requires the literal `CONSENT` token before any personal details may be
+sent to the configured text provider:
 
 ```sh
-node /path/to/reference-film/src/cli.mjs validate --config /path/to/reference-film/examples/project.config.json
+node src/cli.mjs init --project projects/my-film
 ```
 
-CLI paths (`--config`, `--env`, `--audio`, `--timings`) resolve relative to the current
-working directory. Paths owned by a config (`inputs`, references, output) resolve
-relative to that config file. Run `node src/cli.mjs --help` for all preserved options.
-`--provider` overrides video only; text, image, and judge providers remain independent.
+For CI/noninteractive use, prepare a private brief conforming to
+`schemas/creator-brief.schema.json`; do not place personal answers in public examples:
 
-## Contracts and creator workflow
+```sh
+node src/cli.mjs init --project projects/my-film --brief /private/path/brief.json
+```
 
-Canonical JSON Schemas are in `schemas/` for:
+`init` adds a workspace `.gitignore` without replacing existing content. It excludes the
+brief, lyrics, plan, config, workflow audit data, and `.private/` output. Review
+`projects/my-film/project.config.json`, add reference paths under `inputs.faces`, add the
+finished song under `inputs.audioCandidates`, and replace every `SET_ME_*` model name.
+An explicit `--audio` override is also supported.
 
-- project configuration;
-- creator brief;
-- structured lyrics with stable section and line IDs;
-- scene plan, whose `lyric_ids` link scenes to lyric lines; and
-- optional timing overrides.
+Then run the gated flow:
 
-The validator implements only the bounded JSON Schema keyword set documented in
-`src/schema.mjs`; it does not claim general JSON Schema conformance. The example has
-solo, two-person, action, and direct-animation scenes. Edit local JSON and
-`examples/creator-notes.md`; approval `source_hashes` are reserved for later workflow
-slices.
+```sh
+node src/cli.mjs approve --project projects/my-film --stage disclosure \
+  --statement "I reviewed and permit this provider disclosure"
+node src/cli.mjs lyrics --project projects/my-film --yes
+# Review/edit lyrics.json; lyrics.md is only a preview.
+node src/cli.mjs approve --project projects/my-film --stage lyrics \
+  --statement "I approve these lyrics"
+node src/cli.mjs storyboard --project projects/my-film --yes
+# Review/edit scene-plan.json.
+node src/cli.mjs approve --project projects/my-film --stage scenes \
+  --statement "I approve these scenes"
+node src/cli.mjs approve-media --project projects/my-film --acknowledge-rights \
+  --statement "I have rights and informed consent for every current input"
+node src/cli.mjs create --project projects/my-film --yes
+```
 
-Generate the example's deterministic geometric PNG references, group image, and WAV
-tone with `npm run example:assets`. See `examples/ASSET_PROVENANCE.md`. They contain no
-real likenesses or copyrighted source music. Use only references, music, and likenesses
-for which you have rights and informed consent.
+`create` resumes at the next missing stage. `--yes` acknowledges potentially paid work
+with unknown cost; it never grants disclosure, editorial approval, likeness consent, or
+media rights. Rights approval hashes normalized config references, direct-animation
+photos, and the selected audio (including `--audio`), and writes both creator and media
+approval records. Changing any file invalidates both gates. Empty references are allowed
+while drafting, but validation/generation stops before media spend.
 
-## Environment and privacy
+Run individual media stages with `images`, `videos`, and `assemble`; `run` runs all of
+them. `--provider xai|gemini` changes video only. `--scenes`, `--concurrency`, `--judge`
+or `--no-judge`, `--audio`, and `--timings` are available. Generated video audio is
+disabled/stripped; assembly uses only the supplied song. With `--no-judge`, inspect the
+candidate and explicitly accept its exact checksum:
 
-Environment files are **never auto-loaded**. Select one explicitly with
-`--env path/to/project.env`, or set `envFile` in a project config. Supported variables
-are documented in `.env.example`: `XAI_API_KEY` (`GROK_API_KEY` alias), xAI/Grok base
-URL variables, and Gemini variables. Credentials live in a non-enumerable runtime
-field and are omitted when normalized config is serialized.
+```sh
+node src/cli.mjs approve-artifact --project projects/my-film \
+  --scene scene_id --stage image --checksum <sha256>
+```
 
-Outputs must include the project slug as a directory segment and may not target the
-filesystem root, home, current directory, or config directory. The example writes to
-`.generated/example-film` and dry-run only prints the planned execution—it does not
-fabricate outputs or model responses.
+## Resume and reconciliation
+
+Paid operations have durable journals. Rerunning resumes known asynchronous video IDs
+and never silently repeats uncertain requests. If a synchronous response was completed
+but its local result was lost, confirm provider state and explicitly accept duplicate
+billing risk before one replacement submission:
+
+```sh
+node src/cli.mjs reconcile --project projects/my-film --operation <creator-id> \
+  --reason "provider confirmed no usable result" --acknowledge-duplicate-risk
+node src/cli.mjs reconcile-media --project projects/my-film --operation <media-id> \
+  --reason "provider confirmed no accepted request" --acknowledge-duplicate-risk
+```
+
+Lyrics and storyboard cache provenance binds prompt, model, upstream content, output
+budget, generation epoch, and artifact checksum. Edited JSON remains an editable draft,
+but stale content is never presented as a matching generated cache. Use `--force` only
+after resolving uncertain journal entries; it intentionally starts a new generation
+epoch. Edited `lyrics.md`/`music-brief.md` previews are not silently overwritten.
+
+## Validation, status, contracts, and paths
+
+```sh
+node src/cli.mjs validate --config /absolute/project.config.json
+node src/cli.mjs status --config /absolute/project.config.json
+node src/cli.mjs run --dry-run --config /absolute/project.config.json
+```
+
+These root commands call the actual media read-only functions and timeline implementation.
+They make no network calls. Config-owned paths resolve relative to the config; CLI paths
+resolve relative to the current working directory, so external-CWD use is supported.
+
+Canonical bounded schemas live in `schemas/` for project config, creator brief, lyrics,
+scene plan, and timings. Creator approvals/provenance are under `workflow/`; media rights,
+paid-operation journals, scene selections, timeline, and final reports are under the
+configured private output directory. The validator supports the explicitly documented
+JSON Schema subset in `src/schema.mjs`, not arbitrary JSON Schema.
+
+## Privacy, costs, and limitations
+
+Environment files are never auto-loaded. Pass `--env` or configure `envFile`; see
+`.env.example`. Credentials are non-enumerable and sanitized from stored diagnostics.
+Prompts necessarily disclose approved brief data and references to selected providers.
+Keep workspaces and source media private, review provider retention/privacy terms, and
+never use a likeness or recording without rights and informed consent.
+
+Prices are reported when providers return them; otherwise costs remain explicitly
+unknown. Quality checks reduce but cannot eliminate identity drift, unsafe generations,
+or editing errors. Human review is required. Provider APIs and supported models can
+change and are not checked during offline validation.
 
 ## License status
 
-The owner has not selected a license. `package.json` is `UNLICENSED`, and no
-open-source license is granted at present.
+The owner has not selected a license. `package.json` is `UNLICENSED`; no open-source
+license is granted yet.
