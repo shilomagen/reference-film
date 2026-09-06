@@ -38,8 +38,11 @@ FFmpeg-dependent behavior should check prerequisites and fail clearly. Tests may
 
 Provider work must preserve an offline validation path. Do not assume an unknown provider cost is zero, and do not make external calls during tests.
 
-## Rights, consent, and license status
+## Rights, consent, and license
 
 Contributors are responsible for having rights and informed consent for submitted text, likenesses, music, logos, and other material. Avoid real biometric or identifying data in contributions. See [Privacy](docs/privacy.md) and [Security](SECURITY.md).
 
-The project owner has not selected a license. Public availability and acceptance of a contribution do not grant permission to use, copy, or redistribute the project. Do not add license headers or claim an open-source license without explicit owner direction.
+The project is licensed under [MIT](LICENSE), and contributions submitted for inclusion
+are provided under the same MIT terms. MIT applies to project code and documentation;
+it does not grant rights to submitted likenesses, music, input assets, generated media,
+or third-party services.

@@ -22,4 +22,6 @@ The CLI processes sensitive local configuration and may eventually send selected
 
 Use only likenesses, music, logos, and other material for which you have rights and informed consent. Identity and likeness checks are probabilistic and cannot establish consent, ownership, or a perfect identity match. See [docs/privacy.md](docs/privacy.md) for data-flow and deletion limits.
 
-This policy is not a grant of license. The owner has not selected a project license.
+Project code and documentation are licensed under the [MIT License](LICENSE). That
+license does not grant rights to likenesses, music, input assets, generated media, or
+third-party services; the safeguards in this policy still apply.

@@ -30,4 +30,6 @@ npm test
 
 ## License check
 
-- [ ] I did not add or imply a license without explicit owner approval; public availability is not permission to reuse the project.
+- [ ] I understand that contributions submitted for inclusion are provided under MIT.
+- [ ] New source/package exports retain `LICENSE`; third-party material is compatible and attributed as required.
+- [ ] I did not imply that MIT grants likeness, music, input-asset, generated-media, or provider rights.

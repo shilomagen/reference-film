@@ -135,7 +135,13 @@ unknown. Quality checks reduce but cannot eliminate identity drift, unsafe gener
 or editing errors. Human review is required. Provider APIs and supported models can
 change and are not checked during offline validation.
 
-## License status
+## License
 
-The owner has not selected a license. `package.json` is `UNLICENSED`; no open-source
-license is granted yet.
+Project code and documentation are available under the [MIT License](LICENSE). The
+`private: true` package setting exists only to prevent accidental npm publication; it
+does not limit the rights granted by MIT.
+
+MIT covers this project's software, not rights in user-supplied likenesses, voices,
+music, logos, text, or other input assets. It also does not provide those rights for
+generated media or replace any third-party provider terms. Obtain all required rights
+and informed consent separately.

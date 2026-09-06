@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const MIT_LICENSE_BYTES = 1069;
+const MIT_LICENSE_SHA256 = "bc4fed2333e93e719a3b2aa84b45f3326131ed2ef0e74817ee02f2bb5823795f";
 
 function walk(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -14,16 +17,22 @@ function walk(directory) {
   });
 }
 
-test("package contract is private, unlicensed, dependency-free, and positively allowlisted", () => {
+test("package contract is private against publication, MIT-licensed, dependency-free, and positively allowlisted", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  const lock = JSON.parse(fs.readFileSync(path.join(root, "package-lock.json"), "utf8"));
+  const license = fs.readFileSync(path.join(root, "LICENSE"));
   assert.equal(pkg.private, true);
-  assert.equal(pkg.license, "UNLICENSED");
+  assert.equal(pkg.license, "MIT");
+  assert.equal(lock.packages[""].license, "MIT");
   assert.equal(pkg.type, "module");
   assert.equal(pkg.engines.node, ">=20");
   assert.equal(pkg.dependencies, undefined);
   assert.equal(pkg.devDependencies, undefined);
   assert.deepEqual(Object.keys(pkg.scripts).sort(), ["check", "dry-run", "example:assets", "test", "validate"]);
-  assert.ok(Array.isArray(pkg.files) && pkg.files.length > 0);
+  assert.ok(Array.isArray(pkg.files) && pkg.files.includes("LICENSE"));
+  assert.equal(license.length, MIT_LICENSE_BYTES);
+  assert.equal(crypto.createHash("sha256").update(license).digest("hex"), MIT_LICENSE_SHA256);
+  assert.match(license.toString("utf8"), /^MIT License\n\nCopyright \(c\) 2026 Shilo Magen\n/);
   assert.equal(Object.keys(pkg.scripts).some((name) => /install|postinstall|preinstall/.test(name)), false);
 });
 

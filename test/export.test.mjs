@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { collectPublicFiles, exportPublicSource } from "../scripts/export.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const MIT_LICENSE_BYTES = 1069;
+const MIT_LICENSE_SHA256 = "bc4fed2333e93e719a3b2aa84b45f3326131ed2ef0e74817ee02f2bb5823795f";
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reference-film-export-test-"));
@@ -162,7 +164,20 @@ test("current checkout export has valid CLI syntax and help", (t) => {
   const temporary = temporaryDirectory(t);
   const destination = path.join(temporary, "public-source");
   const before = collectPublicFiles(REPOSITORY_ROOT).map(({ path: filePath, bytes, sha256 }) => ({ path: filePath, bytes, sha256 }));
-  exportPublicSource({ sourceRoot: REPOSITORY_ROOT, destination });
+  const { manifest } = exportPublicSource({ sourceRoot: REPOSITORY_ROOT, destination });
+  const exportedLicense = fs.readFileSync(path.join(destination, "LICENSE"));
+  assert.deepEqual(manifest.license, {
+    status: "included",
+    files: ["LICENSE"],
+    notice: "Review the included license file(s) for the terms that apply.",
+  });
+  assert.deepEqual(
+    manifest.files.find((file) => file.path === "LICENSE"),
+    { path: "LICENSE", bytes: MIT_LICENSE_BYTES, sha256: MIT_LICENSE_SHA256 },
+  );
+  assert.equal(exportedLicense.length, MIT_LICENSE_BYTES);
+  assert.equal(crypto.createHash("sha256").update(exportedLicense).digest("hex"), MIT_LICENSE_SHA256);
+  assert.deepEqual(exportedLicense, fs.readFileSync(path.join(REPOSITORY_ROOT, "LICENSE")));
   const syntax = spawnSync(process.execPath, ["--check", path.join(destination, "src", "cli.mjs")], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
   const exportedCli = fs.realpathSync(path.join(destination, "src", "cli.mjs"));
