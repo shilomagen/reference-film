@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createLogger, safeSerialize } from "../src/io.mjs";
 import { createXaiProvider, usageCostUsd } from "../src/providers/xai.mjs";
 
 function provider(fetch) {
@@ -46,6 +47,28 @@ test("text/judge schema fallback occurs only for explicit unsupported response f
   });
   await assert.rejects(noFallback.generateText({ model: "text", prompt: "p", schema: { name: "x", value: {} } }), /HTTP 400/);
   assert.equal(arbitraryCalls, 1);
+});
+
+test("provider error echoes cannot expose the xAI credential", async () => {
+  const key = "xai-error-secret-sentinel";
+  const logs = [];
+  const client = createXaiProvider({
+    apiKey: key, baseUrl: "http://127.0.0.1:45678/v1",
+    testOrigins: ["http://127.0.0.1:45678"], sleep: async () => {}, retry: { retries: 0 },
+    logger: (message, metadata) => logs.push(JSON.stringify({ message, metadata })),
+    fetch: async () => new Response(JSON.stringify({ error: {
+      code: `invalid_${key}`,
+      message: `credential ${key}; response_format json_schema is not supported`,
+    } }), { status: 401 }),
+  });
+  const error = await client.generateText({ model: "text", prompt: "p" }).catch((caught) => caught);
+  assert.doesNotMatch(error.message, new RegExp(key));
+  assert.doesNotMatch(JSON.stringify(error), new RegExp(key));
+  assert.doesNotMatch(safeSerialize({ error }), new RegExp(key));
+  const output = [];
+  createLogger({ stream: { write: (line) => output.push(line) } })("provider failure", { error });
+  assert.doesNotMatch(output.join(""), new RegExp(key));
+  assert.doesNotMatch(logs.join("\n"), new RegExp(key));
 });
 
 test("structured output parse does not trigger paid repair", async () => {

@@ -23,7 +23,7 @@ test("journal prevents duplicate after restart and explicit reconciliation permi
   restarted.authorizeRetry("image-1", "provider confirmed no accepted request", { acknowledgeDuplicateRisk: true });
   const result = await restarted.run({ id: "image-1", provider: "xai", operation: "image", model: "m", fingerprint: "fp" }, async () => {
     calls += 1;
-    return { state: "completed", metadata: { requestId: "req-2", costUsd: 0.25, url: "https://secret.invalid/signed?token=x" }, result: { bytes: "not persisted" } };
+    return { state: "completed", metadata: { requestId: "req-2", operationId: "operations/completed-2", costUsd: 0.25, url: "https://secret.invalid/signed?token=x", prompt: "private payload" }, result: { bytes: "not persisted" } };
   });
   assert.equal(calls, 2);
   assert.deepEqual(result.result, { bytes: "not persisted" });
@@ -31,9 +31,10 @@ test("journal prevents duplicate after restart and explicit reconciliation permi
   assert.equal(calls, 2);
 
   const raw = fs.readFileSync(path.join(directory, "image-1.json"), "utf8");
-  assert.doesNotMatch(raw, /not persisted|secret\.invalid/);
+  assert.doesNotMatch(raw, /not persisted|secret\.invalid|private payload/);
   const entry = JSON.parse(raw);
   assert.equal(entry.state, "completed");
+  assert.equal(entry.operationId, "operations/completed-2");
   assert.equal(entry.costUsd, 0.25);
   assert.ok(entry.history.some((event) => event.state === "uncertain"));
   assert.ok(entry.history.some((event) => event.state === "retry_authorized"));

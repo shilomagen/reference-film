@@ -7,9 +7,31 @@ export const PROVIDER_CAPABILITIES = Object.freeze({
   gemini: Object.freeze(["video"]),
 });
 
-function credential(config, provider, key) {
-  const map = config.credentials?.[provider] ?? {};
-  return map[key] ?? config[key] ?? null;
+function providerCredentials(config, provider) {
+  const credentials = config.credentials ?? {};
+  const nested = credentials[provider] ?? {};
+  if (provider === "xai") {
+    return {
+      apiKey: nested.apiKey ?? credentials.xaiApiKey ?? config.apiKey ?? null,
+      baseUrl: nested.baseUrl ?? credentials.xaiBaseUrl ?? config.apiBaseUrl ?? null,
+    };
+  }
+  return {
+    // Deliberately do not fall back to config.apiKey: that legacy key belongs to
+    // xAI and must never be sent to Gemini.
+    apiKey: nested.apiKey ?? credentials.geminiApiKey ?? config.geminiApiKey ?? null,
+    baseUrl: nested.baseUrl ?? credentials.geminiBaseUrl ?? config.geminiApiBaseUrl ?? null,
+  };
+}
+
+function providerRetry(config) {
+  const retry = config.retry ?? config.generation?.retry ?? config.generation ?? {};
+  return {
+    retries: retry.retries ?? retry.retryCount ?? retry.attempts,
+    baseDelayMs: retry.baseDelayMs ?? retry.retryBaseDelayMs,
+    maxDelayMs: retry.maxDelayMs ?? retry.retryMaxDelayMs,
+    jitterRatio: retry.jitterRatio ?? retry.retryJitterRatio ?? retry.jitter,
+  };
 }
 
 function requestedProviders(config) {
@@ -38,11 +60,12 @@ export function createProviderRegistry(config = {}, dependencies = {}) {
   const make = (name) => {
     if (cache.has(name)) return cache.get(name);
     let provider;
+    const credentials = providerCredentials(config, name);
     if (name === "xai") {
       provider = createXaiProvider({
-        apiKey: credential(config, "xai", "apiKey"),
-        baseUrl: credential(config, "xai", "baseUrl") ?? config.apiBaseUrl,
-        retry: config.retry ?? config.generation,
+        apiKey: credentials.apiKey,
+        baseUrl: credentials.baseUrl,
+        retry: providerRetry(config),
         journal: dependencies.journal,
         fetch: dependencies.fetch,
         sleep: dependencies.sleep,
@@ -53,9 +76,9 @@ export function createProviderRegistry(config = {}, dependencies = {}) {
       });
     } else if (name === "gemini") {
       provider = createGeminiProvider({
-        apiKey: credential(config, "gemini", "apiKey") ?? config.geminiApiKey,
-        baseUrl: credential(config, "gemini", "baseUrl") ?? config.geminiApiBaseUrl,
-        retry: config.retry ?? config.generation,
+        apiKey: credentials.apiKey,
+        baseUrl: credentials.baseUrl,
+        retry: providerRetry(config),
         journal: dependencies.journal,
         fetch: dependencies.fetch,
         sleep: dependencies.sleep,

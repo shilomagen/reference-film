@@ -13,10 +13,10 @@ The provider layer is standalone Node.js ESM and has no runtime dependencies. It
     text: "text-model", image: "image-model", judge: "judge-model",
     video: "xai-video-model", geminiVideo: "veo-model"
   },
-  // Either top-level credentials...
+  // Explicit top-level credentials remain supported...
   apiKey: "...", apiBaseUrl: "https://api.x.ai/v1",
   geminiApiKey: "...", geminiApiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-  // ...or this preferred map:
+  // ...as does a nested map:
   credentials: {
     xai: { apiKey: "...", baseUrl: "https://api.x.ai/v1" },
     gemini: { apiKey: "...", baseUrl: "https://generativelanguage.googleapis.com/v1beta" }
@@ -24,6 +24,8 @@ The provider layer is standalone Node.js ESM and has no runtime dependencies. It
   retry: { retries: 7, baseDelayMs: 2000, maxDelayMs: 120000, jitterRatio: 0.2 }
 }
 ```
+
+The registry also consumes `loadConfig`'s non-enumerable flat credential object (`xaiApiKey`, `xaiBaseUrl`, `geminiApiKey`, `geminiBaseUrl`) and maps `generation.retry.{attempts,baseDelayMs,maxDelayMs,jitter}` to the adapter retry policy. Gemini never inherits the legacy top-level xAI `apiKey`.
 
 The registry selects every capability independently. xAI supports `text`, `image`, `judge`, and `video`; Gemini supports `video` only. Unsupported combinations fail during registry creation.
 
@@ -57,7 +59,7 @@ Operation names must be safe relative resources containing an `operations` segme
 
 `createHttpClient(policy)` returns `requestJson(url, options)`. Safe GET/HEAD requests retry transient network errors and HTTP 408/409/425/429/5xx. Paid POST retries are limited to 429 or a provider response that explicitly says capacity rejection/not accepted. An ambiguous network failure, timeout, successful-response read/JSON/validation failure, or non-explicit 5xx throws `AmbiguousPaidRequestError` after exactly one submission. Errors contain bounded status/message data, not response bodies, request payloads, full URLs, or tokens.
 
-`Retry-After` accepts seconds or HTTP dates. Delay exponent, header delay, and final jittered value are capped. Defaults are seven retries, 2 seconds, 120 seconds, and 20% jitter.
+`Retry-After` accepts seconds or HTTP dates. It is treated as a server-requested minimum and negative jitter cannot shorten it; an explicitly configured `maxDelayMs` remains the upper cap. Delay exponent, header delay, and final jittered value are capped. Defaults are seven retries, 2 seconds, 120 seconds, and 20% jitter.
 
 ## Durable paid-operation journal
 

@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { safeSerialize } from "../src/io.mjs";
 import { createGeminiProvider } from "../src/providers/gemini.mjs";
 
 const origin = "http://127.0.0.1:45679";
@@ -42,6 +43,21 @@ test("Gemini rejects credential forwarding on a download redirect", async (t) =>
   });
   await assert.rejects(client.downloadVideo(`${origin}/clip`, path.join(directory, "clip.mp4")), /credentials across a redirect|unexpected origin/);
   assert.equal(seenKey, "fake-gemini-key");
+});
+
+test("provider error echoes cannot expose the Gemini credential", async () => {
+  const key = "gemini-error-secret-sentinel";
+  const client = createGeminiProvider({
+    apiKey: key, baseUrl: `${origin}/v1beta`, testOrigins: [origin],
+    fetch: async () => new Response(JSON.stringify({ error: {
+      code: `invalid_${key}`, message: `credential ${key} was rejected`,
+    } }), { status: 400 }),
+    sleep: async () => {}, retry: { retries: 0 },
+  });
+  const error = await client.getVideo("operations/failure").catch((caught) => caught);
+  assert.doesNotMatch(error.message, new RegExp(key));
+  assert.doesNotMatch(JSON.stringify(error), new RegExp(key));
+  assert.doesNotMatch(safeSerialize({ error }), new RegExp(key));
 });
 
 test("Gemini start preserves data URI payload and does not retry 5xx POST", async () => {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { canonicalJson, download, mapLimit, objectHash, redact, safeSerialize, writeJson } from "../src/io.mjs";
+import { canonicalJson, download, mapLimit, objectHash, redact, safeSerialize, sanitizeUrl, writeJson } from "../src/io.mjs";
 
 test("mapLimit drains remaining work before reporting item failures", async () => {
   const visited = [];
@@ -26,16 +26,17 @@ test("canonical hashes ignore object key insertion order and JSON writes atomica
   assert.deepEqual(fs.readdirSync(path.dirname(target)), ["value.json"]);
 });
 
-test("redaction removes secrets, auth, signed queries, and base64 from serializers", () => {
+test("redaction removes secrets, auth, arbitrary URL parameters, and embedded base64", () => {
   const encoded = "A".repeat(120);
   const clean = safeSerialize({
     apiKey: "fake-key-sentinel", authorization: "Bearer abc.def",
-    media: `data:image/png;base64,${encoded}`,
-    url: "https://assets.example/clip?X-Amz-Signature=abc&token=xyz",
+    media: `prefix data:image/png;base64,${encoded} suffix`,
+    url: "https://assets.example/clip?api_key=query-sentinel&bespoke_signature=other#fragment-sentinel",
     message: "Bearer abc.def fake-key-sentinel",
   }, { secrets: ["fake-key-sentinel"] });
-  assert.doesNotMatch(clean, /fake-key-sentinel|abc\.def|X-Amz-Signature|AAAAA/);
-  assert.match(clean, /REDACTED/);
+  assert.doesNotMatch(clean, /fake-key-sentinel|abc\.def|query-sentinel|other|fragment-sentinel|AAAAA/);
+  assert.match(clean, /prefix \[REDACTED BASE64\] suffix/);
+  assert.equal(sanitizeUrl("https://user:password@assets.example/path/file.mp4?harmless_name=secret#private"), "https://assets.example/path/file.mp4");
   assert.equal(redact("ordinary creative prose"), "ordinary creative prose");
 });
 

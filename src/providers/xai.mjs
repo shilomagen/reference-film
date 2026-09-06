@@ -46,7 +46,7 @@ function isUnsupportedResponseFormat(error) {
 }
 
 function normalizeConfig(config) {
-  const retry = config.retry ?? config.generation ?? {};
+  const retry = config.retry ?? config.generation?.retry ?? config.generation ?? {};
   return {
     apiKey: config.apiKey,
     baseUrl: config.baseUrl ?? config.apiBaseUrl ?? DEFAULT_BASE_URL,
@@ -58,10 +58,10 @@ function normalizeConfig(config) {
     testOrigins: config.testOrigins ?? [],
     journal: config.journal,
     retry: {
-      retries: retry.retries ?? retry.retryCount ?? config.retryCount ?? 7,
+      retries: retry.retries ?? retry.retryCount ?? retry.attempts ?? config.retryCount ?? 7,
       baseDelayMs: retry.baseDelayMs ?? retry.retryBaseDelayMs ?? 2000,
       maxDelayMs: retry.maxDelayMs ?? retry.retryMaxDelayMs ?? 120_000,
-      jitterRatio: retry.jitterRatio ?? retry.retryJitterRatio ?? 0.2,
+      jitterRatio: retry.jitterRatio ?? retry.retryJitterRatio ?? retry.jitter ?? 0.2,
     },
   };
 }

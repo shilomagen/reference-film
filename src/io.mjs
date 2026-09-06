@@ -6,8 +6,8 @@ import { spawn } from "node:child_process";
 
 const SENSITIVE_HEADER = /^(authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key|cookie|set-cookie)$/i;
 const SENSITIVE_KEY = /(?:^|_)(?:api_?key|authorization|access_?token|refresh_?token|secret|password|credential)(?:$|_)/i;
-const SIGNED_QUERY_KEY = /^(?:x-amz-|x-goog-|signature$|sig$|token$|key$|expires$|credential$)/i;
 const DATA_URI = /^data:[^;,]+;base64,[a-z0-9+/=\s]+$/i;
+const EMBEDDED_DATA_URI = /data:[^;,\s]+;base64,[a-z0-9+/=]+/gi;
 const LONG_BASE64 = /^(?:[A-Za-z0-9+/]{4}){20,}(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export function ensureDir(directory) {
@@ -128,7 +128,10 @@ export function sanitizeUrl(value) {
   } catch {
     return "[REDACTED URL]";
   }
-  if ([...parsed.searchParams.keys()].some((key) => SIGNED_QUERY_KEY.test(key))) parsed.search = "";
+  // Query parameter names are provider-defined and arbitrary signed parameters
+  // are common. Retain only origin/path diagnostics, never query or fragment.
+  parsed.search = "";
+  parsed.hash = "";
   parsed.username = "";
   parsed.password = "";
   return parsed.toString();
@@ -143,6 +146,7 @@ export function redact(value, { secrets = [] } = {}) {
       if (DATA_URI.test(item) || LONG_BASE64.test(item.replace(/\s/g, ""))) return "[REDACTED BASE64]";
       let output = item;
       for (const secret of knownSecrets) output = output.split(secret).join("[REDACTED]");
+      output = output.replace(EMBEDDED_DATA_URI, "[REDACTED BASE64]");
       output = output.replace(/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/gi, "$1 [REDACTED]");
       output = output.replace(/https?:\/\/[^\s<>"']+/gi, (url) => sanitizeUrl(url));
       return output;

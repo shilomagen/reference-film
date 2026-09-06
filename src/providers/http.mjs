@@ -36,7 +36,10 @@ export function retryDelayMs({
   const retryAfterMs = parseRetryAfterMs(retryAfter, now);
   const base = Math.min(maxDelayMs, retryAfterMs ?? baseDelayMs * 2 ** Math.max(0, attempt - 1));
   const factor = 1 + jitterRatio * (random() * 2 - 1);
-  return Math.max(0, Math.min(maxDelayMs, Math.round(base * factor)));
+  const jittered = Math.max(0, Math.min(maxDelayMs, Math.round(base * factor)));
+  // Retry-After is a server-requested minimum. Negative jitter must not make a
+  // client retry sooner; maxDelayMs is the explicit local cap and sole exception.
+  return retryAfterMs === null ? jittered : Math.max(Math.min(maxDelayMs, retryAfterMs), jittered);
 }
 
 function errorInfo(payload) {
@@ -53,16 +56,23 @@ export function isExplicitCapacityRejection(status, payload) {
   const info = errorInfo(payload);
   const text = [info.message, info.code, info.type, info.status].filter(Boolean).join(" ");
   if (status === 429) return true;
-  return [400, 409, 503].includes(status)
-    && /(?:capacity|overload|overloaded|no\s+capacity|resource[_ ]?exhausted|request\s+(?:was\s+)?not\s+accepted)/i.test(text)
-    && /(?:reject|not\s+accepted|overload|capacity|resource[_ ]?exhausted|try\s+again)/i.test(text);
+  if (![400, 409, 503].includes(status)) return false;
+  const overload = /(?:capacity|overload|overloaded|no\s+capacity|resource[_ ]?exhausted)/i.test(text);
+  // Capacity language alone (especially on a 5xx) does not prove that a paid
+  // submission was rejected before acceptance. Require that assurance in the
+  // provider response before allowing another submission.
+  const explicitlyUnaccepted = /(?:request|submission|job|operation)?\s*(?:was\s+|is\s+)?(?:rejected|not\s+accepted|not\s+submitted)|rejected\s+(?:before|without)\s+(?:acceptance|submission)/i.test(text);
+  return overload && explicitlyUnaccepted;
 }
 
-function safeError(status, payload, provider) {
+function safeError(status, payload, provider, secrets = []) {
   const info = errorInfo(payload);
-  const code = info.code ?? info.type ?? info.status;
-  const classification = `${info.message ?? ""} ${code ?? ""}`;
-  const error = new ProviderHttpError(`${provider} request failed with HTTP ${status}${code ? ` (${String(redact(code)).slice(0, 100)})` : ""}`, {
+  const rawCode = info.code ?? info.type ?? info.status;
+  const classification = `${info.message ?? ""} ${rawCode ?? ""}`;
+  const code = rawCode === null || rawCode === undefined
+    ? null
+    : String(redact(String(rawCode), { secrets })).slice(0, 100);
+  const error = new ProviderHttpError(`${provider} request failed with HTTP ${status}${code ? ` (${code})` : ""}`, {
     status,
     code,
     details: {
@@ -84,6 +94,7 @@ export function createHttpClient({
   jitterRatio = 0.2,
   logger = () => {},
   provider = "Provider",
+  secrets = [],
 } = {}) {
   if (typeof fetchImpl !== "function") throw new TypeError("A fetch implementation is required");
 
@@ -163,7 +174,13 @@ export function createHttpClient({
       if (!safeGet && paid && response.status >= 500 && !explicitlyRejected) {
         throw new AmbiguousPaidRequestError(`${provider} paid request outcome is uncertain after HTTP ${response.status}`, { status: response.status });
       }
-      const error = safeError(response.status, payload, provider);
+      const requestSecrets = [...secrets];
+      for (const [name, value] of Object.entries(headers)) {
+        if (/^(?:authorization|proxy-authorization|x-api-key|x-goog-api-key|api-key)$/i.test(name) && typeof value === "string") {
+          requestSecrets.push(value, value.replace(/^\s*(?:Bearer|Basic)\s+/i, ""));
+        }
+      }
+      const error = safeError(response.status, payload, provider, requestSecrets);
       error.retryAfter = response.headers.get("retry-after");
       if (!(safeRetryable || paidRetryable) || attempt >= attempts) throw error;
       const delay = retryDelayMs({

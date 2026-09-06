@@ -8,6 +8,8 @@
   "files": [
     "README.md",
     "src/*.mjs",
+    "src/providers/*.mjs",
+    "docs/*.md",
     "schemas/*.json",
     "examples/*.json",
     "examples/*.md",

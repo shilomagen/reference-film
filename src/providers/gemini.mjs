@@ -25,7 +25,7 @@ export function validateOperationName(value) {
 }
 
 function normalizeConfig(config) {
-  const retry = config.retry ?? config.generation ?? {};
+  const retry = config.retry ?? config.generation?.retry ?? config.generation ?? {};
   return {
     apiKey: config.apiKey ?? config.geminiApiKey,
     baseUrl: config.baseUrl ?? config.geminiApiBaseUrl ?? DEFAULT_GEMINI_BASE_URL,
@@ -38,10 +38,10 @@ function normalizeConfig(config) {
     trustedOrigins: config.trustedOrigins ?? DEFAULT_GEMINI_TRUSTED_ORIGINS,
     journal: config.journal,
     retry: {
-      retries: retry.retries ?? retry.retryCount ?? 7,
+      retries: retry.retries ?? retry.retryCount ?? retry.attempts ?? 7,
       baseDelayMs: retry.baseDelayMs ?? retry.retryBaseDelayMs ?? 2000,
       maxDelayMs: retry.maxDelayMs ?? retry.retryMaxDelayMs ?? 120_000,
-      jitterRatio: retry.jitterRatio ?? retry.retryJitterRatio ?? 0.2,
+      jitterRatio: retry.jitterRatio ?? retry.retryJitterRatio ?? retry.jitter ?? 0.2,
     },
   };
 }
