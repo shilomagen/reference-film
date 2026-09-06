@@ -37,7 +37,7 @@ await runMedia({
   registry,                // optional injected public provider-registry shape
   journal,                 // optional PaidOperationJournal
   fetch, sleep, random,    // optional provider/test dependencies
-  clock, clockMs, logger,
+  clock, clockMs, logger, onEstimate,
   testOrigins, trustedOrigins,
   process, download,       // optional local-process/download test adapters
 });
@@ -81,12 +81,17 @@ fingerprints. Thus policy edits rejudge existing candidates/clips without buying
 creative generation again.
 
 Every reusable selection has a SHA256 checksum. Missing, stale, mismatched, failed, or
-corrupt selections are rejected. Starting a video writes its operation ID before the
+corrupt selections are rejected. `imageFingerprints(config, plan, scene, {epoch})` and
+`videoFingerprints({...})` are exported from `src/generation.mjs` so generation,
+status, and direct assembly apply the same current reference/prompt/model/QA checks. Starting a video writes its operation ID before the
 first poll. Poll timeouts, GET failures, missing completion URLs, and download failures
 leave that operation resumable; rerunning polls and downloads the same operation rather
 than POSTing again. Definite provider job failure or failed QA may consume the next
 configured attempt. Ambiguous paid submissions are blocked by the provider journal
-until explicit duplicate-risk reconciliation; `--force` is not a bypass.
+until explicit duplicate-risk reconciliation; `--force` is not a bypass. Adapter calls
+receive stable operation keys containing scene, stage, generation epoch, round/attempt,
+and generation/QA fingerprints. `--force` advances a durable per-scene epoch once;
+resuming a failed forced run retains that epoch.
 
 Provider URLs are never persisted by the media engine. Metadata records only safe IDs,
 checksums, statuses, timestamps, model/provider labels, and costs. Unknown costs remain
@@ -105,7 +110,12 @@ and clips with passed technical QA. Clips are normalized in plan order to fixed 
 FPS, pixel format, and exact duration; short clips use final-frame padding. All model
 audio is stripped. The supplied song is the sole final audio stream. A configured zero
 freeze is supported. Output is isolated under `final-<provider>/<project-slug>.mp4` with
-timeline, poster, checksums, source fingerprints, and a safe report.
+timeline, poster, checksums, source fingerprints, and a safe report. Clips are retimed
+across their entire source duration before a one-frame encoding-tolerance pad; the true
+final freeze is made from one final frame. The report gives known costs separately from
+an explicit unknown-cost flag. `media-run.json` records safe stage/failure state and
+`generation-epochs.json` records force epochs; neither contains prompts, URLs, base64,
+or credentials.
 
 ## Standalone CLI
 
@@ -117,4 +127,7 @@ timeline, poster, checksums, source fingerprints, and a safe report.
 - `reconcile --operation-id ID --reason TEXT --acknowledge-duplicate-risk`
 
 `status`, `validate`, `dry-run`, and `assemble` never perform paid work. Dry-run reports
-upper request-count bounds and explicitly marks prices unknown.
+upper request-count bounds and explicitly marks prices unknown. Before paid work the
+CLI prints the same estimate. A full run preflights rights, `--yes`, audio unless
+`--allow-silent`, all local files, timeline consistency, provider construction, models,
+and FFmpeg tools before the first image request. Image-only work does not require audio.

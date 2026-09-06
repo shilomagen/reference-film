@@ -41,7 +41,7 @@ export async function main(argv = process.argv.slice(2), io = process) {
   if (extra.action === "approve-rights") result = await approveMedia({ ...project, acknowledgeRights: extra.acknowledgeRights });
   else if (extra.action === "approve-artifact") result = await approveArtifact({ ...project, sceneId: extra.sceneId, stage: extra.stage, checksum: extra.checksum });
   else if (extra.action === "reconcile") result = reconcilePaidOperation({ config: project.config, operationId: extra.operationId, reason: extra.reason, acknowledgeDuplicateRisk: extra.acknowledgeDuplicateRisk });
-  else result = await runMedia({ command: options.dryRun ? "dry-run" : options.command, ...project, yes: extra.yes });
+  else result = await runMedia({ command: options.dryRun ? "dry-run" : options.command, ...project, yes: extra.yes, onEstimate: async (estimate) => { io.stdout.write(`Paid workload estimate: images<=${estimate.imageRequestsUpperBound}, judges<=${estimate.judgeRequestsUpperBound}, videos<=${estimate.videoRequestsUpperBound}; price unknown.\n`); } });
   io.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return 0;
 }

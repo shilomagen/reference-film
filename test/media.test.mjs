@@ -30,6 +30,20 @@ test("rights approval is hash-bound and --yes is spend only", async (t) => {
   assert.equal(paid, 0);
 });
 
+test("full-run preflight failures make zero paid calls", async (t) => {
+  const { config, plan } = fixture(t);
+  config.audio = null; config.allowSilent = false; config.models.image = "image-model"; config.models.video = "video-model";
+  await approveMedia({ config, plan, acknowledgeRights: true });
+  let paid = 0;
+  const registry = { image: { async generateCandidates() { paid++; } }, judge: {}, video: {} };
+  await assert.rejects(runMedia({ command: "run", config, plan, yes: true, registry }), /requires audio/);
+  assert.equal(paid, 0);
+  config.allowSilent = true;
+  const badTimings = { timings: [{ scene_id: "one", duration_seconds: Number.NaN }] };
+  await assert.rejects(runMedia({ command: "run", config, plan, timings: badTimings, yes: true, registry, process: async () => ({ stdout: "" }) }), /positive and finite/);
+  assert.equal(paid, 0);
+});
+
 test("dry-run estimates unknown prices and never calls providers", async (t) => {
   const { config, plan } = fixture(t);
   const result = await dryRunMedia({ config, plan, process: async () => ({ stdout: "2.5\n" }) });

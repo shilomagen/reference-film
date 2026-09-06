@@ -112,14 +112,15 @@ export function imageQaFingerprint(config) {
   return { judgeEnabled: config.quality.judgeEnabled, judgeModel: config.models.judge, thresholds: { identity: config.quality.imageIdentityMinimum, anatomy: config.quality.imageAnatomyMinimum, characters: config.quality.imageCharactersMinimum }, rubric: config.quality.rubric };
 }
 
-export function videoQaFingerprint(config, { direct = false } = {}) {
-  return { judgeEnabled: config.quality.judgeEnabled, judgeModel: config.models.judge, thresholds: { identity: config.quality.videoIdentityMinimum, stability: config.quality.videoStabilityMinimum, anatomy: 60, continuity: 60, personCount: direct ? 80 : null }, direct };
+export function videoQaFingerprint(config, { direct = false, sourceStillSha256 = null, referenceHashes = [] } = {}) {
+  return { judgeEnabled: config.quality.judgeEnabled, judgeModel: config.models.judge, thresholds: { identity: config.quality.videoIdentityMinimum, stability: config.quality.videoStabilityMinimum, anatomy: 60, continuity: 60, personCount: direct ? 80 : null }, direct, sourceStillSha256, referenceHashes };
 }
 
-export async function evaluateImageCandidates({ client, config, scene, candidatePaths }) {
+export async function evaluateImageCandidates({ client, config, scene, candidatePaths, operationKey }) {
   if (!config.quality.judgeEnabled) return { automatedJudge: false, status: "needs_review", passed: false, candidates: candidatePaths.map((_, index) => ({ candidate: index + 1, passed: false, needs_review: true, rejection_reasons: [], notes: "Automated judging disabled; checksum-bound manual approval required." })), costUsd: 0, costUnknown: false };
   const references = scene.characters.flatMap((name) => config.inputs.faces[name]);
-  const response = await client.judgeImages({ model: config.models.judge, prompt: imageJudgePrompt(scene, candidatePaths.length, config), images: [...references, ...candidatePaths].map(toDataUri), schema: imageQaSchema(scene.characters, candidatePaths.length) });
+  const response = await client.judgeImages({ model: config.models.judge, prompt: imageJudgePrompt(scene, candidatePaths.length, config), images: [...references, ...candidatePaths].map(toDataUri), schema: imageQaSchema(scene.characters, candidatePaths.length), operationKey });
+  if (response?.reused && response.json == null) throw new Error("Paid image QA result is unavailable locally; reconcile the provider journal entry before replacement");
   const parsed = validateImageJudgeResult(judgeJson(response), scene.characters, candidatePaths.length);
   const rubric = config.quality.rubric;
   const candidates = [...parsed.candidates].sort((a, b) => a.candidate - b.candidate).map((candidate) => {
@@ -134,11 +135,12 @@ export async function evaluateImageCandidates({ client, config, scene, candidate
   return { automatedJudge: true, model: response.model ?? config.models.judge, candidates, ...costs(response) };
 }
 
-export async function evaluateVideoFrames({ client, config, scene, sourceStill, framePaths }) {
+export async function evaluateVideoFrames({ client, config, scene, sourceStill, framePaths, operationKey }) {
   if (!config.quality.judgeEnabled) return { automatedJudge: false, status: "needs_review", passed: false, needs_review: true, notes: "Automated judging disabled; checksum-bound manual approval required.", costUsd: 0, costUnknown: false };
   const direct = scene.source_image_mode === "direct_animation";
   const references = direct ? [] : scene.characters.flatMap((name) => config.inputs.faces[name]);
-  const response = await client.judgeImages({ model: config.models.judge, prompt: direct ? directPhotoJudgePrompt(scene, framePaths.length) : videoJudgePrompt(scene, framePaths.length, config), images: [...references, sourceStill, ...framePaths].map(toDataUri), schema: direct ? directPhotoQaSchema() : videoQaSchema(scene.characters) });
+  const response = await client.judgeImages({ model: config.models.judge, prompt: direct ? directPhotoJudgePrompt(scene, framePaths.length) : videoJudgePrompt(scene, framePaths.length, config), images: [...references, sourceStill, ...framePaths].map(toDataUri), schema: direct ? directPhotoQaSchema() : videoQaSchema(scene.characters), operationKey });
+  if (response?.reused && response.json == null) throw new Error("Paid video QA result is unavailable locally; reconcile the provider journal entry before replacement");
   const parsed = validateVideoJudgeResult(judgeJson(response), scene.characters, { direct });
   const minimum_identity = direct ? parsed.group_identity_preservation : Math.min(...scene.characters.map((name) => parsed.identity_scores[name]));
   const threshold_failures = [];
