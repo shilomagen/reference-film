@@ -2,7 +2,8 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+import { isMain } from "../src/entrypoint.mjs";
 
 const SCRIPT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ROOT_FILES = new Set([
@@ -224,8 +225,7 @@ export function main(argv = process.argv.slice(2), io = process) {
   return 0;
 }
 
-const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (invokedDirectly) {
+if (isMain(import.meta.url)) {
   try {
     process.exitCode = main();
   } catch (error) {
