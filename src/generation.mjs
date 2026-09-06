@@ -59,8 +59,6 @@ function epochWorkDirectory(root, epoch) {
 
 export async function generateImages({ registry, providers = registry, config, plan, yes = false, clock = () => new Date(), process = runProcess, download = downloadFile, operationEpochs = {} }) {
   if (!yes) throw new Error("Paid image generation requires yes: true (spend acknowledgement)");
-  const imageProvider = providers.image;
-  const judgeProvider = providers.judge;
   return mapLimit(plan.scenes, config.generation.concurrency, async (scene) => {
     const paths = scenePaths(config, plan, scene);
     ensureDir(paths.image);
@@ -76,6 +74,10 @@ export async function generateImages({ registry, providers = registry, config, p
       return writeSelection(paths.imageSelection, paths.selectedImage, { sceneId: scene.scene_id, status: "selected", sourceMode: "direct_animation", generationEpoch: epoch, generationFingerprint: fingerprints.generation, qaFingerprint: fingerprints.qa, selectedAt: now(clock), costUsd: 0, costUnknown: false, technicalPassed: true });
     }
 
+    // Direct-photo scenes are entirely local. Resolve paid adapters only after
+    // that branch so a direct-only image stage needs no provider credentials.
+    const imageProvider = providers.image;
+    const judgeProvider = config.quality.judgeEnabled ? providers.judge : null;
     const references = scene.characters.flatMap((name) => config.inputs.faces[name]).map(toDataUri);
     const history = [];
     let bestNeedsReview = null;
@@ -189,7 +191,7 @@ export function videoFingerprints({ config, plan, scene, providerName = config.p
 export async function generateVideos({ registry, providers = registry, config, plan, yes = false, clock = () => new Date(), clockMs = Date.now, sleep = defaultSleep, process = runProcess, operationEpochs = {} }) {
   if (!yes) throw new Error("Paid video generation requires yes: true (spend acknowledgement)");
   const provider = providers.video;
-  const judge = providers.judge;
+  const judge = config.quality.judgeEnabled ? providers.judge : null;
   const providerName = registry?.selected?.video ?? config.providers.video;
   const timeline = await buildTimeline(config, { ...plan, scenes: plan.allScenes });
   const durations = new Map(timeline.scenes.map((item) => [item.scene_id, item.duration_seconds]));
