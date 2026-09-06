@@ -94,10 +94,10 @@ export function createProviderRegistry(config = {}, dependencies = {}) {
   };
 
   const registry = {
-    text: make(selected.text),
-    image: make(selected.image),
-    judge: make(selected.judge),
-    video: make(selected.video),
+    get text() { return make(selected.text); },
+    get image() { return make(selected.image); },
+    get judge() { return make(selected.judge); },
+    get video() { return make(selected.video); },
     selected,
     models: {
       text: config.models?.text ?? null,

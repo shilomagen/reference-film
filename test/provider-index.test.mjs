@@ -22,6 +22,46 @@ test("registry selects each capability and rejects unsupported combinations", ()
   assert.throws(() => validateProviderSelection({ providers: { text: "gemini" } }), /does not support/);
 });
 
+test("text-only generation does not require credentials for selected Gemini video", async () => {
+  const requests = [];
+  const config = {
+    providers: { text: "xai", image: "xai", judge: "xai", video: "gemini" },
+    credentials: { xai: { apiKey: "fake-x" } },
+  };
+  const registry = createProviderRegistry(config, {
+    fetch: async (url) => {
+      requests.push(String(url));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "offline result" } }] }), { status: 200 });
+    },
+  });
+
+  const result = await registry.text.generateText({ model: "text-model", prompt: "hello" });
+  assert.equal(result.text, "offline result");
+  assert.equal(requests.length, 1);
+  assert.throws(() => registry.video, /Gemini apiKey is required/);
+
+  config.credentials.gemini = { apiKey: "fake-g" };
+  assert.equal(registry.video, registry.video);
+});
+
+test("Gemini-only video access does not require xAI credentials", () => {
+  const registry = createProviderRegistry({
+    providers: { video: "gemini" },
+    quality: { judgeEnabled: false },
+    credentials: { gemini: { apiKey: "fake-g" } },
+  }, { fetch: async () => { throw new Error("offline"); } });
+
+  assert.equal(registry.selected.video, "gemini");
+  assert.equal(registry.video, registry.video);
+});
+
+test("unavailable selected capabilities still fail during registry creation", () => {
+  assert.throws(() => createProviderRegistry({
+    providers: { text: "gemini", video: "gemini" },
+    credentials: { gemini: { apiKey: "fake-g" } },
+  }), /gemini does not support the text capability/);
+});
+
 test("actual loader credentials, URLs, and retry controls map to isolated adapters", async () => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const environment = {
@@ -84,10 +124,11 @@ test("package allowlist includes providers and docs without generated assets or 
 });
 
 test("Gemini never inherits the legacy xAI top-level apiKey", () => {
-  assert.throws(() => createProviderRegistry({
+  const registry = createProviderRegistry({
     providers: { video: "gemini" },
     apiKey: "xai-only-sentinel",
-  }), /Gemini apiKey is required/);
+  });
+  assert.throws(() => registry.video, /Gemini apiKey is required/);
 });
 
 test("provider artifact and duration helpers are generic", () => {

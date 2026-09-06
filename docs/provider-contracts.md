@@ -27,7 +27,7 @@ The provider layer is standalone Node.js ESM and has no runtime dependencies. It
 
 The registry also consumes `loadConfig`'s non-enumerable flat credential object (`xaiApiKey`, `xaiBaseUrl`, `geminiApiKey`, `geminiBaseUrl`) and maps `generation.retry.{attempts,baseDelayMs,maxDelayMs,jitter}` to the adapter retry policy. Gemini never inherits the legacy top-level xAI `apiKey`.
 
-The registry selects every capability independently. xAI supports `text`, `image`, `judge`, and `video`; Gemini supports `video` only. Unsupported combinations fail during registry creation.
+The registry selects every capability independently. xAI supports `text`, `image`, `judge`, and `video`; Gemini supports `video` only. Unsupported combinations fail during registry creation. Capability properties (`text`, `image`, `judge`, and `video`) instantiate their selected adapter lazily, so credentials are required only when that capability is accessed. Capabilities selecting the same provider share one cached adapter instance. `selected` and `models` remain immediately available without constructing an adapter.
 
 Individual adapters may be created with `createXaiProvider({apiKey, baseUrl, retry, ...})` and `createGeminiProvider({apiKey, baseUrl, retry, ...})`. Tests can inject `fetch`, `sleep`, `random`, `clock`, and explicit `testOrigins`. Plain HTTP is rejected unless its exact loopback origin is injected. Production Gemini credentials are restricted to `https://generativelanguage.googleapis.com`; extra trusted origins must be an explicit application decision.
 
