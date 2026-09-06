@@ -16,6 +16,7 @@
         "scenes": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 120,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -23,11 +24,11 @@
             "properties": {
               "scene_id": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$", "maxLength": 64 },
               "section": { "type": "string", "minLength": 1 },
-              "lyrics": { "type": "string" },
-              "lyric_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" } },
+              "lyrics": { "type": "string", "maxLength": 1200 },
+              "lyric_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" } },
               "duration_seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 },
               "lock_duration": { "type": "boolean" },
-              "characters": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" } },
+              "characters": { "type": "array", "maxItems": 12, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" } },
               "source_image": { "type": "string", "minLength": 1 },
               "source_image_mode": { "const": "direct_animation" },
               "image_generation": {

@@ -67,6 +67,7 @@ function normalizeConfig(config) {
     logger: config.logger,
     testOrigins: config.testOrigins ?? [],
     journal: config.journal,
+    textMaxOutputTokens: config.textMaxOutputTokens ?? config.generation?.textMaxOutputTokens ?? 12_000,
     retry: {
       retries: retry.retries ?? retry.retryCount ?? retry.attempts ?? config.retryCount ?? 7,
       baseDelayMs: retry.baseDelayMs ?? retry.retryBaseDelayMs ?? 2000,
@@ -86,6 +87,8 @@ export class XaiProvider {
     this.fetch = normalized.fetch ?? globalThis.fetch;
     this.testOrigins = normalized.testOrigins;
     this.journal = normalized.journal;
+    if (!Number.isInteger(normalized.textMaxOutputTokens) || normalized.textMaxOutputTokens < 1000 || normalized.textMaxOutputTokens > 32_000) throw new Error("textMaxOutputTokens must be an integer from 1000 to 32000");
+    this.textMaxOutputTokens = normalized.textMaxOutputTokens;
     this.requestJson = createHttpClient({
       fetch: this.fetch, sleep: normalized.sleep, random: normalized.random,
       clock: normalized.clock, logger: normalized.logger, provider: "xAI", ...normalized.retry,
@@ -142,7 +145,7 @@ export class XaiProvider {
       model,
       messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...imageContent] }],
       temperature: 0,
-      max_tokens: 3500,
+      max_tokens: this.textMaxOutputTokens,
     };
     let payload;
     try {

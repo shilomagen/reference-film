@@ -28,5 +28,5 @@ for (const [filename, color, offset] of assets) {
     "-frames:v", "1", path.join(output, filename),
   ]);
 }
-ffmpeg(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=18", "-c:a", "pcm_s16le", path.join(output, "example-tone.wav")]);
+ffmpeg(["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=20", "-c:a", "pcm_s16le", path.join(output, "example-tone.wav")]);
 process.stdout.write(`Generated ${assets.length} synthetic PNG files and one WAV tone in ${output}\n`);

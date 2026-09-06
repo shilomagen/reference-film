@@ -1,16 +1,38 @@
 {
   "project_slug": "example-film",
-  "creative_intent": "Follow two fictional makers as they carry a handmade light through a quiet evening.",
-  "audience": "A general audience viewing a short workflow demonstration.",
-  "visual_direction": "Warm, handmade, hopeful, and easy to read without dialogue.",
-  "constraints": [
-    "Use only synthetic reference media.",
-    "Avoid logos, visible text, and imitation of a named artist."
-  ],
-  "approvals": {
-    "reference_rights_confirmed": true,
-    "music_rights_confirmed": true,
-    "source_hashes": {}
+  "subject": {
+    "character_id": "traveler",
+    "display_name": "The Traveler",
+    "pronouns": "they/them",
+    "reference_files": ["assets/traveler-primary.png", "assets/traveler-profile.png"]
   },
-  "notes_markdown": "Creator notes may be maintained here or in a neighboring local Markdown file. Source hashes are reserved for later approval checkpoints."
+  "occasion": "A fictional demonstration of a handmade lantern walk.",
+  "relationship": "A storyteller introducing a fictional character.",
+  "intended_message": "Small acts of making and sharing can brighten an ordinary evening.",
+  "facts": {
+    "memories": ["The traveler once carried a paper lantern along a quiet path."],
+    "details": ["The lantern is handmade from amber paper."],
+    "personality": ["patient", "curious"],
+    "interests": ["evening walks", "handmade objects"]
+  },
+  "supporting_characters": [
+    {
+      "character_id": "maker",
+      "display_name": "The Maker",
+      "pronouns": "they/them",
+      "relationship": "A fictional friend who builds the lantern.",
+      "reference_files": ["assets/maker-primary.png"]
+    }
+  ],
+  "language": "English",
+  "music": {
+    "characteristics": ["gentle acoustic rhythm", "clear singable refrain", "warm sparse arrangement"],
+    "tone": "Hopeful and intimate without imitating a named artist.",
+    "target_duration_seconds": 60
+  },
+  "boundaries": ["No logos or visible writing", "Do not invent biographical details"],
+  "consent": {
+    "personal_details_provider_disclosure": true,
+    "statement": "This example is synthetic and may be sent to the configured text provider."
+  }
 }

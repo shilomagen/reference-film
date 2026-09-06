@@ -7,7 +7,7 @@ import { readJson, validateCanonical } from "./schema.mjs";
 
 export const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const DEFAULT_CONFIG_PATH = path.join(PROJECT_ROOT, "examples", "project.config.json");
-export const COMMANDS = Object.freeze(["run", "images", "videos", "assemble", "status", "validate"]);
+export const COMMANDS = Object.freeze(["init", "lyrics", "storyboard", "approve", "approve-media", "approve-artifact", "create", "reconcile", "reconcile-media", "run", "images", "videos", "assemble", "status", "validate"]);
 
 export const HELP = `Reference Film offline CLI
 
@@ -15,14 +15,25 @@ Usage:
   node src/cli.mjs <command> [options]
 
 Commands:
-  validate   Validate contracts and local paths (offline by default)
-  status     Report local artifact status
-  run        Compile a plan; requires --dry-run in this slice
-  images     Reserved for still generation (not implemented yet)
-  videos     Reserved for animation (not implemented yet)
-  assemble   Reserved for local assembly (not implemented yet)
+  init        Create a workspace from --brief JSON or six concise prompts
+  lyrics      Generate schema-valid editable lyrics (one text request)
+  storyboard Generate scenes from approved lyrics (one text request)
+  approve     Record disclosure, lyrics, scenes, or media-rights approval
+  approve-media Bridge current normalized media hashes into both rights gates
+  approve-artifact Manually accept a no-judge image/video candidate checksum
+  create      Resume the gated creator workflow, stopping for human review
+  reconcile   Authorize one retry for an uncertain creator text operation
+  reconcile-media Authorize one retry for an uncertain media operation
+  validate    Validate contracts and local paths (offline by default)
+  status      Report local artifact status
+  run         Run media stages (or compile the existing plan with --dry-run)
+  images      Generate/select stills through the media module
+  videos      Animate selected stills through the media module
+  assemble    Assemble accepted clips through the media module
 
 Options:
+  --project <dir>       Creator workspace (brief.json, lyrics.json, scene-plan.json)
+  --brief <path>        Creator brief JSON for noninteractive init/CI
   --config <path>       Config path, relative to the current directory
   --env <path>          Explicit environment file, relative to the current directory
   --audio <path>        Audio override, relative to the current directory
@@ -33,7 +44,16 @@ Options:
   --dry-run             Compile and print paths/prompts without network calls
   --force               Request regeneration in a future paid stage
   --judge / --no-judge  Override automated judging
-  --allow-silent        Permit a missing audio track
+  --allow-silent        Permit a missing audio track for an explicit preview
+  --yes                 Acknowledge possible spend; never editorial/rights approval
+  --stage <name>        Approval stage: disclosure, lyrics, scenes, rights
+  --statement <text>    Explicit local approval statement
+  --acknowledge-rights  Attest rights for current media file hashes
+  --scene <id>          Scene for approve-artifact
+  --checksum <sha256>   Exact candidate checksum for approve-artifact
+  --operation <id>      Paid journal operation to reconcile
+  --reason <text>       Reconciliation reason
+  --acknowledge-duplicate-risk  Permit exactly one uncertain-operation retry
   --help                Show this help
 `;
 
@@ -54,6 +74,9 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
   const options = {
     command,
     config: DEFAULT_CONFIG_PATH,
+    configExplicit: false,
+    project: null,
+    brief: null,
     env: null,
     audio: null,
     timings: null,
@@ -64,6 +87,15 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
     force: false,
     judge: undefined,
     allowSilent: false,
+    yes: false,
+    stage: null,
+    statement: null,
+    acknowledgeRights: false,
+    scene: null,
+    checksum: null,
+    operation: null,
+    reason: null,
+    acknowledgeDuplicateRisk: false,
   };
   const start = argv[0] === command ? 1 : 0;
   for (let index = start; index < argv.length; index += 1) {
@@ -73,9 +105,16 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
     else if (arg === "--judge") options.judge = true;
     else if (arg === "--no-judge") options.judge = false;
     else if (arg === "--allow-silent") options.allowSilent = true;
-    else if (["--config", "--env", "--audio", "--timings"].includes(arg)) {
+    else if (arg === "--yes") options.yes = true;
+    else if (arg === "--acknowledge-rights") options.acknowledgeRights = true;
+    else if (arg === "--acknowledge-duplicate-risk") options.acknowledgeDuplicateRisk = true;
+    else if (["--config", "--env", "--audio", "--timings", "--project", "--brief"].includes(arg)) {
       const key = arg.slice(2);
       options[key] = fromCwd(valueAfter(argv, index, arg), cwd);
+      if (arg === "--config") options.configExplicit = true;
+      index += 1;
+    } else if (["--stage", "--statement", "--scene", "--checksum", "--operation", "--reason"].includes(arg)) {
+      options[arg.slice(2).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = valueAfter(argv, index, arg);
       index += 1;
     } else if (arg === "--provider") {
       options.provider = valueAfter(argv, index, arg).toLowerCase();
@@ -91,6 +130,7 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
       if (!Number.isInteger(options.concurrency) || options.concurrency < 1) throw new Error("--concurrency must be a positive integer");
     } else throw new Error(`Unknown option '${arg}'`);
   }
+  if (options.project && !options.configExplicit) options.config = path.join(options.project, "project.config.json");
   return options;
 }
 
@@ -251,15 +291,30 @@ function validateUniqueDocumentIds(lyrics, timings, plan) {
   if (lyrics) {
     const sections = new Set();
     const lines = new Set();
+    const repeatable = new Set();
+    const ordered = [];
     for (const section of lyrics.sections) {
       if (sections.has(section.section_id)) throw new Error(`Duplicate lyrics section_id '${section.section_id}'`);
       sections.add(section.section_id);
       for (const line of section.lines) {
         if (lines.has(line.line_id)) throw new Error(`Duplicate lyrics line_id '${line.line_id}'`);
         lines.add(line.line_id);
+        ordered.push(line.line_id);
+        if (section.repeat) repeatable.add(line.line_id);
       }
     }
-    for (const scene of plan.allScenes) for (const id of scene.lyric_ids) if (!lines.has(id)) throw new Error(`Scene '${scene.scene_id}' references unknown lyric_id '${id}'`);
+    const counts = new Map();
+    let position = -1;
+    for (const scene of plan.allScenes) for (const id of scene.lyric_ids) {
+      if (!lines.has(id)) throw new Error(`Scene '${scene.scene_id}' references unknown lyric_id '${id}'`);
+      const count = (counts.get(id) ?? 0) + 1;
+      counts.set(id, count);
+      if (count > 1 && !repeatable.has(id)) throw new Error(`Scene plan repeats lyric_id '${id}' without repeat=true`);
+      const next = ordered.indexOf(id);
+      if (next < position && !repeatable.has(id)) throw new Error(`Scene '${scene.scene_id}' places lyric_id '${id}' out of intended order`);
+      position = Math.max(position, next);
+    }
+    for (const id of lines) if (!counts.has(id)) throw new Error(`Scene plan does not cover lyric_id '${id}'`);
   }
   if (timings) {
     const scenes = new Set(plan.allScenes.map((scene) => scene.scene_id));
@@ -273,6 +328,7 @@ function validateUniqueDocumentIds(lyrics, timings, plan) {
 }
 
 export function validateLocalInputs(config, plan) {
+  if (Object.values(config.inputs.faces).flat().length === 0) throw new Error("At least one character reference is required before media validation or generation");
   for (const [character, references] of Object.entries(config.inputs.faces)) {
     for (const [index, filePath] of references.entries()) assertExistingFile(filePath, `face reference ${character}[${index}]`);
   }

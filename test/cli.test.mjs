@@ -28,11 +28,10 @@ test("dry run compiles selected work with full timeline semantics and network de
     assert.equal(calls, 0);
     assert.equal(output.networkCalls, 0);
     assert.equal(output.providers.video, "gemini");
-    assert.equal(output.selectedVideoModel, "example-gemini-video-model");
     assert.deepEqual(output.scenes.map((scene) => scene.scene_id), ["lantern_run"]);
-    assert.equal(output.timeline.length, 4);
-    assert.equal(output.fullTimelineDurationSeconds, 18);
-    assert.match(output.scenes[0].outputDirectory, /03_lantern_run$/);
+    assert.equal(output.timeline.scenes.length, 4);
+    assert.equal(output.timeline.total_duration_seconds, 20);
+    assert.match(output.scenes[0].paths.root, /03_lantern_run$/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -48,8 +47,8 @@ test("validation is offline and status honestly reports missing media", async ()
     const status = capture();
     await main(["status"], status.io);
     const result = JSON.parse(status.output().stdout);
-    assert.equal(result.final, "no media yet");
-    assert.ok(result.scenes.every((scene) => scene.image === "no media yet" && scene.video === "no media yet"));
+    assert.equal(result.final.status, "missing");
+    assert.ok(result.scenes.every((scene) => scene.image === "missing" && scene.video === "missing"));
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -60,8 +59,8 @@ test("paid stage commands fail honestly without attempting network", async () =>
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { calls += 1; };
   try {
-    await assert.rejects(() => main(["images"], capture().io), /not implemented.*no provider.*attempted/i);
-    await assert.rejects(() => main(["run"], capture().io), /Paid generation is not implemented/);
+    await assert.rejects(() => main(["images"], capture().io), /Paid generation requires yes/);
+    await assert.rejects(() => main(["run"], capture().io), /Paid generation requires yes/);
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;
@@ -73,7 +72,7 @@ test("CLI runs from an external working directory with an explicit config", () =
     cwd: path.dirname(root), encoding: "utf8", env: { PATH: process.env.PATH },
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal(JSON.parse(result.stdout).project, "example-film");
+  assert.equal(JSON.parse(result.stdout).status, "ok");
 });
 
 test("help does not load config or require generated assets", () => {

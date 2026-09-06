@@ -1,10 +1,12 @@
 {
   "title": "Small Lights",
-  "language": "en",
+  "language": "English",
+  "music_direction": "Gentle acoustic rhythm, warm sparse arrangement, and a clear singable refrain; approximately one minute.",
   "sections": [
     {
       "section_id": "verse_01",
       "label": "Verse 1",
+      "repeat": false,
       "lines": [
         { "line_id": "verse_01_line_01", "text": "A little light waits by the door" },
         { "line_id": "verse_01_line_02", "text": "Two steady hands can carry it farther" }
@@ -13,6 +15,7 @@
     {
       "section_id": "chorus_01",
       "label": "Chorus",
+      "repeat": true,
       "lines": [
         { "line_id": "chorus_01_line_01", "text": "Step into the evening glow" },
         { "line_id": "chorus_01_line_02", "text": "Make a bright path as we go" }

@@ -44,7 +44,7 @@
           "additionalProperties": {
             "anyOf": [
               { "type": "string", "minLength": 1 },
-              { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } }
+              { "type": "array", "items": { "type": "string", "minLength": 1 } }
             ]
           }
         },
@@ -84,6 +84,11 @@
         "imageRounds": { "type": "integer", "minimum": 1, "maximum": 10 },
         "videoAttempts": { "type": "integer", "minimum": 1, "maximum": 10 },
         "concurrency": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "textMaxOutputTokens": { "type": "integer", "minimum": 1000, "maximum": 32000 },
+        "imageResolution": { "enum": ["1k", "2k"] },
+        "imageQuality": { "enum": ["low", "medium", "high"] },
+        "videoResolution": { "enum": ["720p", "1080p"] },
+        "videoAudioPolicy": { "enum": ["disabled", "strip-in-assembly"] },
         "pollIntervalMs": { "type": "integer", "minimum": 100 },
         "pollTimeoutMs": { "type": "integer", "minimum": 1000 },
         "retry": {
