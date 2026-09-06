@@ -50,8 +50,13 @@ async function writeRun(config, value, clock = () => new Date()) {
   return safe;
 }
 
-function assertPaidModels(config, command) {
-  const keys = command === "images" ? ["image", ...(config.quality.judgeEnabled ? ["judge"] : [])] : command === "videos" ? [config.providers.video === "gemini" ? "geminiVideo" : "video", ...(config.quality.judgeEnabled ? ["judge"] : [])] : ["image", config.providers.video === "gemini" ? "geminiVideo" : "video", ...(config.quality.judgeEnabled ? ["judge"] : [])];
+function assertPaidModels(config, plan, command) {
+  const needsGeneratedImages = plan.scenes.some((scene) => scene.source_image_mode !== "direct_animation");
+  const keys = command === "images"
+    ? [...(needsGeneratedImages ? ["image"] : []), ...(needsGeneratedImages && config.quality.judgeEnabled ? ["judge"] : [])]
+    : command === "videos"
+      ? [config.providers.video === "gemini" ? "geminiVideo" : "video", ...(config.quality.judgeEnabled ? ["judge"] : [])]
+      : [...(needsGeneratedImages ? ["image"] : []), config.providers.video === "gemini" ? "geminiVideo" : "video", ...(config.quality.judgeEnabled ? ["judge"] : [])];
   for (const key of keys) {
     const model = config.models[key];
     if (!model || /^(?:example(?:[-_ ].*)?|placeholder(?:[-_ ].*)?|your[-_ ]|change[-_ ]me|grok-(?:text|vision)$|veo-fast$)/i.test(model)) throw new Error(`Paid generation requires a non-placeholder models.${key}`);
@@ -69,7 +74,7 @@ async function preflight({ config, plan, timings, command, process }) {
     const ffprobe = process ? true : await executableAvailable("ffprobe");
     if (!ffmpeg || !ffprobe) throw new Error("FFmpeg and ffprobe are required before paid full-run generation");
   }
-  assertPaidModels(config, command);
+  assertPaidModels(config, plan, command);
   return timeline;
 }
 
