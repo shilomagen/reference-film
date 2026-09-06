@@ -26,6 +26,10 @@ Deleting a local project should include its source files, outputs, caches, check
 
 Use `scripts/export.mjs` only as a review aid. It makes a new allowlisted source copy and does not publish it. Inspect the resulting manifest and files before sharing.
 
-## License status
+## License scope
 
-No project license has been selected. Public availability is not permission to copy, reuse, train on, or redistribute project material or user submissions.
+Project code and documentation are licensed under the [MIT License](../LICENSE). MIT
+permits use, modification, distribution, sublicensing, and sale of the software, subject
+to its notice condition. It does not grant rights to user submissions, likenesses,
+voices, music, input assets, generated media, or third-party provider services and
+terms. Secure those rights and informed consent separately.

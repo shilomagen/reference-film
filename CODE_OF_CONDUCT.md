@@ -18,4 +18,6 @@ These standards apply in project spaces and when representing the project elsewh
 
 Maintainers will handle reports as confidentially as practical, but cannot promise absolute confidentiality or a particular resolution timeline. Retaliation against a reporter or participant in an investigation is unacceptable.
 
-This project is owner-license-pending; this document establishes community expectations and does not grant permission to reuse the project.
+Project code and documentation, including this document, are available under the
+[MIT License](LICENSE). Those terms do not diminish these community expectations or
+grant rights to another person's likeness, private information, or submitted media.

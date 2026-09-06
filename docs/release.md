@@ -1,6 +1,6 @@
 # Release process
 
-Releases are deliberate, local, and owner-approved. This document does not authorize publishing, pushing, auto-merging, or selecting a license.
+Releases are deliberate, local, and owner-approved. This document does not authorize publishing, pushing, or auto-merging.
 
 ## Prepare
 
@@ -8,7 +8,7 @@ Releases are deliberate, local, and owner-approved. This document does not autho
 2. Confirm Node.js 20+ and FFmpeg are available.
 3. Confirm examples and tests contain only synthetic material and no real faces, songs, credentials, paid responses, private paths, or corporate tooling.
 4. Review privacy and cost changes, provider policy assumptions, downstream stack dependencies, schemas, and migration notes.
-5. Check that the package remains `UNLICENSED` unless the owner has explicitly selected a license. Public source availability alone is not permission to reuse it.
+5. Confirm `package.json`, `package-lock.json`, packaged files, and source exports identify and include the owner-selected MIT license.
 
 ## Verify
 
@@ -36,8 +36,16 @@ node scripts/export.mjs ../reference-film-public-review
 
 The dependency-free exporter copies only explicit public-source categories, rejects source symlinks and unsafe destinations, and writes `EXPORT_MANIFEST.json` with paths, byte counts, SHA-256 checksums, and license status. It does not use Git, contact an external service, or publish anything.
 
-Review the entire export and manifest. Confirm private workspace files, environments, projects, checkpoints, source/generated media, and unknown files are absent. If no license file exists, the manifest must report `pending` and must not claim an open-source license.
+Review the entire export and manifest. Confirm `LICENSE` is present with its expected
+byte count and checksum, and that the manifest reports it as included. Confirm private
+workspace files, environments, projects, checkpoints, source/generated media, and
+unknown files are absent. The exporter's `pending` fallback remains only for unrelated
+source trees that genuinely contain no license file.
 
 ## Owner decision and publication
 
-The owner decides whether to select a license, merge, tag, push, publish, or distribute an export. Re-run verification on the exact approved commit and compare inventory checksums immediately before any separately authorized publication. Never infer authorization from this checklist, a passing CI run, or repository visibility.
+The owner has selected MIT for this project and separately decides whether to merge,
+tag, push, publish, or distribute an export. Re-run verification on the exact approved
+commit and compare inventory checksums immediately before any separately authorized
+publication. Never infer publication authorization from this checklist, a passing CI
+run, or repository visibility.

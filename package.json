@@ -3,9 +3,10 @@
   "version": "0.0.1",
   "description": "Local-first contracts and offline CLI for reference-driven films",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "files": [
+    "LICENSE",
     "README.md",
     "src/*.mjs",
     "src/providers/*.mjs",
