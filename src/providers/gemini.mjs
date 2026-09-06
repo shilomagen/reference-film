@@ -12,6 +12,15 @@ export function parseDataUri(value) {
   return { mimeType: match[1], bytesBase64Encoded: match[2].replace(/\s/g, "") };
 }
 
+function durableOperationKey(operationKey, workKey) {
+  if (operationKey !== undefined && workKey !== undefined && operationKey !== workKey) {
+    throw new Error("operationKey and workKey must match when both are supplied");
+  }
+  const key = operationKey ?? workKey ?? null;
+  if (key !== null && (typeof key !== "string" || !key.trim())) throw new Error("operationKey must be a non-empty string");
+  return key;
+}
+
 export function validateOperationName(value) {
   const name = String(value ?? "");
   if (!name || name.startsWith("/") || name.includes("//") || name.includes("?") || name.includes("#") || name.includes("\\")) {
@@ -84,7 +93,7 @@ export class GeminiProvider {
     });
   }
 
-  async startVideo({ model, prompt, sourceImage, duration, aspectRatio, resolution, options = {}, image, negativePrompt }) {
+  async startVideo({ model, prompt, sourceImage, duration, aspectRatio, resolution, options = {}, image, negativePrompt, operationKey, workKey }) {
     if (!/^[A-Za-z0-9._~-]+$/.test(model)) throw new Error("Invalid Gemini model id");
     const imageInput = parseDataUri(sourceImage ?? image);
     const body = {
@@ -105,7 +114,11 @@ export class GeminiProvider {
     let payload;
     if (this.journal) {
       const fingerprint = objectHash({ provider: "gemini", operation: "video", model, body });
-      const journaled = await this.journal.run({ provider: "gemini", operation: "video", model, fingerprint }, async ({ checkpointAccepted }) => {
+      const journaled = await this.journal.run({
+        provider: "gemini", operation: "video", model, fingerprint,
+        operationKey: durableOperationKey(operationKey, workKey),
+        resultMode: "asynchronous", resumeAccepted: true,
+      }, async ({ checkpointAccepted }) => {
         const response = await submit();
         const operationId = validateOperationName(response.name);
         await checkpointAccepted({ operationId });

@@ -6,6 +6,17 @@ export class PaidOperationBlockedError extends Error {
     super(message);
     this.name = "PaidOperationBlockedError";
     this.entry = entry;
+    this.journalId = entry?.id ?? null;
+  }
+}
+
+export class PaidOperationResultUnavailableError extends Error {
+  constructor(entry) {
+    super(`Paid operation ${entry.id} completed, but its result is not persisted; recover the local artifact or explicitly authorize one replacement submission`);
+    this.name = "PaidOperationResultUnavailableError";
+    this.entry = entry;
+    this.journalId = entry.id;
+    this.resultUnavailable = true;
   }
 }
 
@@ -61,7 +72,14 @@ export class PaidOperationJournal {
     if (typeof reason !== "string" || !reason.trim()) throw new Error("authorizeRetry requires a non-empty reason");
     const entry = this.get(id);
     if (!entry) throw new Error(`Paid operation ${id} does not exist`);
-    if (!BLOCKING.has(entry.state)) throw new PaidOperationBlockedError(`Paid operation ${id} is not in an uncertain or in-flight state`, entry);
+    const resultMode = entry.resultMode ?? "synchronous";
+    const completedSynchronous = entry.state === "completed" && resultMode === "synchronous";
+    if (entry.state === "accepted" && entry.operationId) {
+      throw new PaidOperationBlockedError(`Paid operation ${id} has an accepted operationId and must be resumed by polling, not resubmitted`, entry);
+    }
+    if (!BLOCKING.has(entry.state) && !completedSynchronous) {
+      throw new PaidOperationBlockedError(`Paid operation ${id} is not eligible for an explicitly authorized retry`, entry);
+    }
     entry.retryAuthorization = {
       remaining: 1,
       reason: String(sanitizeMetadata(reason)).slice(0, 500),
@@ -85,16 +103,29 @@ export class PaidOperationJournal {
 
   async run(details, submit) {
     const {
-      id, provider, operation, model = null, fingerprint,
+      id, provider, operation, model = null, fingerprint, operationKey = null,
+      resultMode = "synchronous", resumeAccepted = false,
     } = details;
     if (typeof submit !== "function") throw new TypeError("submit callback is required");
     if (!provider || !operation || !fingerprint) throw new Error("provider, operation, and fingerprint are required");
-    const calculatedId = id ?? objectHash({ provider, operation, model, fingerprint }).slice(0, 32);
+    if (!new Set(["synchronous", "asynchronous"]).has(resultMode)) throw new Error("resultMode must be synchronous or asynchronous");
+    if (operationKey !== null && (typeof operationKey !== "string" || !operationKey.trim())) throw new Error("operationKey must be a non-empty string");
+    const calculatedId = id ?? objectHash(operationKey === null
+      ? { provider, operation, model, fingerprint }
+      : { provider, operation, model, operationKey, fingerprint }).slice(0, 32);
     let entry = this.get(calculatedId);
 
     if (entry) {
-      if (entry.fingerprint !== fingerprint || entry.provider !== provider || entry.operation !== operation || entry.model !== model) {
+      const entryResultMode = entry.resultMode ?? resultMode;
+      if (entry.fingerprint !== fingerprint || entry.provider !== provider || entry.operation !== operation || entry.model !== model || entryResultMode !== resultMode) {
         throw new PaidOperationBlockedError(`Paid operation ${calculatedId} does not match its durable fingerprint`, entry);
+      }
+      if (entry.resultMode === undefined) {
+        entry.resultMode = resultMode;
+        this.#save(entry);
+      }
+      if (entry.state === "accepted" && resultMode === "asynchronous" && resumeAccepted && entry.operationId) {
+        return { reused: true, entry };
       }
       if (TERMINAL_SUCCESS.has(entry.state)) return { reused: true, entry };
       if (entry.state === "retry_authorized" && entry.retryAuthorization?.remaining === 1) {
@@ -111,12 +142,13 @@ export class PaidOperationJournal {
       }
     } else {
       entry = {
-        version: 1,
+        version: 2,
         id: calculatedId,
         provider,
         operation,
         model,
         fingerprint,
+        resultMode,
         createdAt: this.clock().toISOString(),
         history: [],
       };
@@ -140,8 +172,13 @@ export class PaidOperationJournal {
       this.#event(entry, state === "rejected" ? "failed" : state, metadata);
       return { reused: false, entry, result: outcome?.result };
     } catch (error) {
+      if (error && typeof error === "object" && error.journalId === undefined) error.journalId = calculatedId;
       if (error?.definitiveRejection === true) {
         this.#event(entry, "failed", { reason: error.message, code: error.code });
+      } else if (checkpointed && entry.operationId) {
+        // Once a known asynchronous operation has been durably accepted, a
+        // later local failure cannot make its provider identity ambiguous.
+        this.#event(entry, "accepted", { reason: error?.message, code: error?.code });
       } else {
         this.#event(entry, "uncertain", { reason: error?.message, code: error?.code });
       }

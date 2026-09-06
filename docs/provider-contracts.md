@@ -35,16 +35,18 @@ Individual adapters may be created with `createXaiProvider({apiKey, baseUrl, ret
 
 ### xAI
 
-- `generateText({model, prompt, schema?}) -> {text, json, requestId, costUsd}`
-- `generateCandidates({model, prompt, referenceImages, count, aspectRatio, resolution, quality}) -> {images, requestId, costUsd}`
-- `judgeImages({model, prompt, images, schema}) -> {text, json, requestId, costUsd}`
-- `startVideo({model, prompt, sourceImage, duration, aspectRatio, resolution, options?}) -> {status, operationId, requestId, costUsd}`
+- `generateText({model, prompt, schema?, operationKey?}) -> {text, json, requestId, costUsd}`
+- `generateCandidates({model, prompt, referenceImages, count, aspectRatio, resolution, quality, operationKey?}) -> {images, requestId, costUsd}`
+- `judgeImages({model, prompt, images, schema, operationKey?}) -> {text, json, requestId, costUsd}`
+- `startVideo({model, prompt, sourceImage, duration, aspectRatio, resolution, options?, operationKey?}) -> {status, operationId, requestId, costUsd, reused?}`
 - `getVideo(operationId) -> {status, operationId, progress, video?, error?, costUsd}`
 - `downloadVideo(url, target)`
-- `supportedDurations(resolution) -> number[]`
+- `supportedDurations(resolution) -> number[]` (`[1, 2, ..., 15]`)
 - `supportsAudioControl() -> true`
 
 For text and judging, `schema` is `{name, value}` (or a JSON Schema directly). JSON is parsed and validated by the caller against its application schema; malformed JSON is reported and never repaired by another paid request. The adapter falls back from native response formatting only when a 400 response explicitly says response format or JSON Schema is unsupported. Unknown cost is `null`, never zero.
+
+Every paid method above accepts `operationKey`; `workKey` is an exact alias for migration. If both are supplied they must match. The key is a non-empty caller-owned durable identity such as `scene-7/image/round-2`, `scene-7/image-judge/round-2`, `script/draft-1`, or `scene-7/video/attempt-3`. It is included with the request fingerprint in journal identity but never in the provider HTTP body. Reusing a key with the same body means resume that exact attempt and never automatically POST it again. A deliberately different key permits a new paid call even when the request body is identical. Callers should persist or deterministically reconstruct keys from durable project/scene/round/attempt identities. Omitting it preserves legacy body-fingerprint deduplication for standalone consumers.
 
 ### Gemini Veo
 
@@ -52,6 +54,8 @@ For text and judging, `schema` is `{name, value}` (or a JSON Schema directly). J
 - Poll status is one of `pending`, `done`, `failed`, `filtered`, or `expired`.
 - `supportedDurations("720p")` is `[4, 6, 8]`; 1080p/4k supports `[8]`.
 - `supportsAudioControl()` is `false`. Model-generated audio must be removed in assembly.
+
+These duration maps describe the currently implemented interfaces, not permanent provider availability; upstream products can evolve. No live paid-provider tests were run for this contract update.
 
 Operation names must be safe relative resources containing an `operations` segment. Download URLs are checked before the API key is sent. Redirects are handled manually by the IO layer and credentials are never forwarded to a changed or untrusted origin.
 
@@ -73,7 +77,7 @@ The low-level wrapper API is:
 
 ```js
 await journal.run(
-  { id?, provider, operation, model, fingerprint },
+  { id?, provider, operation, model, fingerprint, operationKey?, resultMode?, resumeAccepted? },
   async ({ id, checkpointAccepted, entry }) => {
     const response = await paidPost();
     // Mandatory immediately after an async operation is accepted and before polling:
@@ -87,15 +91,17 @@ await journal.run(
 );
 ```
 
-A `submission_started` record is atomically written **before** callback invocation. States are `submission_started`, `accepted`, `completed`, `uncertain`, `retry_authorized`, and `failed`. A restart in started/accepted/uncertain state throws `PaidOperationBlockedError`; a generic force flag cannot bypass this API. Reconciliation is deliberately separate:
+A `submission_started` record is atomically written **before** callback invocation. States are `submission_started`, `accepted`, `completed`, `uncertain`, `retry_authorized`, and `failed`. A restart in started/uncertain state throws `PaidOperationBlockedError`; a generic force flag cannot bypass this API. For low-level async use, pass `resultMode: "asynchronous", resumeAccepted: true`. An adapter restart for an accepted asynchronous record with a known operation ID returns `{status: "pending", operationId, reused: true}` without POSTing, so the caller continues with `getVideo(operationId)`. Accepted async jobs with known IDs cannot be authorized for resubmission.
+
+A completed synchronous record cannot reproduce its unpersisted response. The adapter throws `PaidOperationResultUnavailableError`, whose `journalId` identifies the record. Recover the local result if possible. If it is genuinely lost, replacement is deliberately separate:
 
 ```js
-journal.authorizeRetry(id, "provider confirmed no accepted job", {
+journal.authorizeRetry(error.journalId, "local response was lost", {
   acknowledgeDuplicateRisk: true
 });
 ```
 
-This records the prior state and permits exactly one callback invocation. Its authorization is durably consumed before the callback. Historical events, request/operation IDs, and costs remain in `history`. Only a small metadata allow-list is persisted; prompts, payloads, response results, URLs, and base64 media are not. Completed creative output remains the caller's responsibility.
+This requires both a non-empty reason and literal `acknowledgeDuplicateRisk: true`; there is no force/yes shortcut. It records the prior state and permits exactly one callback invocation. A further replacement requires a new explicit authorization, preserving every attempt in `history`. Historical events, request/operation IDs, and costs remain in `history`. Only a small metadata allow-list is persisted; operation keys, prompts, payloads, response results, URLs, and base64 media are not. Completed creative output remains the caller's responsibility. Invalid successful paid response bodies are recorded as `uncertain`, never falsely `completed`; there is no automated paid repair.
 
 Definitive rejection is represented as `failed` and can be submitted again under caller policy. All other thrown callback errors become `uncertain` unless the error has `definitiveRejection === true`.
 

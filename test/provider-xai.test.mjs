@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { createLogger, safeSerialize } from "../src/io.mjs";
+import { createPaidOperationJournal, PaidOperationResultUnavailableError } from "../src/providers/journal.mjs";
 import { createXaiProvider, usageCostUsd } from "../src/providers/xai.mjs";
 
-function provider(fetch) {
+function provider(fetch, journal) {
   return createXaiProvider({
     apiKey: "fake-xai-key", baseUrl: "http://127.0.0.1:45678/v1",
-    testOrigins: ["http://127.0.0.1:45678"], fetch, sleep: async () => {},
+    testOrigins: ["http://127.0.0.1:45678"], fetch, journal, sleep: async () => {},
     retry: { retries: 0 },
   });
 }
@@ -79,4 +83,111 @@ test("structured output parse does not trigger paid repair", async () => {
   });
   await assert.rejects(client.generateText({ model: "text", prompt: "p", schema: { name: "x", value: {} } }), /invalid JSON/);
   assert.equal(calls, 1);
+});
+
+test("operationKey separates intentional identical image rounds and restart never duplicates", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "xai-image-operations-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let posts = 0;
+  const bodies = [];
+  const fetch = async (_url, init) => {
+    posts += 1;
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(`round-${posts}`).toString("base64") }], request_id: `request-${posts}` }), { status: 200 });
+  };
+  const request = { model: "image", prompt: "identical", referenceImages: ["data:image/png;base64,AA=="], count: 1, aspectRatio: "16:9" };
+  const first = provider(fetch, createPaidOperationJournal(directory));
+  assert.equal((await first.generateCandidates({ ...request, operationKey: "scene-7/image/round-1" })).images.length, 1);
+  assert.equal((await first.generateCandidates({ ...request, operationKey: "scene-7/image/round-2" })).images.length, 1);
+  assert.equal(posts, 2);
+  assert.equal("operationKey" in bodies[0], false);
+  assert.equal("workKey" in bodies[0], false);
+
+  const restarted = provider(fetch, createPaidOperationJournal(directory));
+  const error = await restarted.generateCandidates({ ...request, operationKey: "scene-7/image/round-1" }).catch((caught) => caught);
+  assert.ok(error instanceof PaidOperationResultUnavailableError);
+  assert.match(error.journalId, /^[a-f0-9]{32}$/);
+  assert.equal(posts, 2);
+});
+
+test("lost synchronous result requires one-at-a-time acknowledged replacement and keeps audit metadata safe", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "xai-result-recovery-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let posts = 0;
+  const fetch = async () => {
+    posts += 1;
+    return new Response(JSON.stringify({ choices: [{ message: { content: `answer-${posts}` } }], request_id: `request-${posts}`, private_payload: "DO_NOT_PERSIST" }), { status: 200 });
+  };
+  const journal = createPaidOperationJournal(directory);
+  const client = provider(fetch, journal);
+  const options = { model: "text", prompt: "private prompt sentinel", operationKey: "script/draft-1" };
+  assert.equal((await client.generateText(options)).text, "answer-1");
+  const lost = await client.generateText(options).catch((caught) => caught);
+  assert.ok(lost instanceof PaidOperationResultUnavailableError);
+  assert.equal(posts, 1);
+  assert.throws(() => journal.authorizeRetry(lost.journalId, "", { acknowledgeDuplicateRisk: true }), /non-empty reason/);
+  assert.throws(() => journal.authorizeRetry(lost.journalId, "replace lost result"), /acknowledgeDuplicateRisk/);
+
+  journal.authorizeRetry(lost.journalId, "local response was lost", { acknowledgeDuplicateRisk: true });
+  assert.equal((await client.generateText(options)).text, "answer-2");
+  const lostAgain = await client.generateText(options).catch((caught) => caught);
+  assert.ok(lostAgain instanceof PaidOperationResultUnavailableError);
+  assert.equal(posts, 2);
+  journal.authorizeRetry(lostAgain.journalId, "second local response was lost", { acknowledgeDuplicateRisk: true });
+  assert.equal((await client.generateText(options)).text, "answer-3");
+  assert.equal(posts, 3);
+
+  const raw = fs.readFileSync(journal.pathFor(lost.journalId), "utf8");
+  assert.doesNotMatch(raw, /private prompt sentinel|script\/draft-1|DO_NOT_PERSIST|answer-/);
+  const entry = JSON.parse(raw);
+  assert.equal(entry.history.filter(({ state }) => state === "retry_authorized").length, 2);
+  assert.equal(entry.history.filter(({ state }) => state === "submission_started").length, 3);
+});
+
+test("accepted video is recovered by operationKey without another POST and malformed success is uncertain", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "xai-video-recovery-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let posts = 0;
+  const fetch = async () => {
+    posts += 1;
+    return new Response(JSON.stringify(posts === 1 ? { request_id: "video-known-1" } : {}), { status: 200 });
+  };
+  const options = { model: "video", prompt: "move", sourceImage: "data:image/png;base64,AA==", duration: 5, aspectRatio: "16:9", resolution: "720p", operationKey: "scene-7/video/attempt-1" };
+  const started = await provider(fetch, createPaidOperationJournal(directory)).startVideo(options);
+  assert.equal(started.operationId, "video-known-1");
+  const recovered = await provider(fetch, createPaidOperationJournal(directory)).startVideo(options);
+  assert.equal(recovered.operationId, "video-known-1");
+  assert.equal(recovered.reused, true);
+  assert.equal(posts, 1);
+
+  const invalid = await provider(fetch, createPaidOperationJournal(directory)).startVideo({ ...options, operationKey: "scene-7/video/attempt-2" }).catch((caught) => caught);
+  assert.match(invalid.message, /invalid|operation/i);
+  assert.equal(posts, 2);
+  assert.equal(createPaidOperationJournal(directory).get(invalid.journalId).state, "uncertain");
+});
+
+test("invalid successful synchronous body is uncertain rather than completed", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "xai-invalid-success-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const journal = createPaidOperationJournal(directory);
+  const client = provider(async () => new Response(JSON.stringify({ data: [] }), { status: 200 }), journal);
+  const error = await client.generateCandidates({
+    model: "image", prompt: "scene", referenceImages: ["data:image/png;base64,AA=="],
+    count: 1, aspectRatio: "16:9", operationKey: "scene/image/invalid-result",
+  }).catch((caught) => caught);
+  assert.match(error.message, /invalid/i);
+  assert.equal(journal.get(error.journalId).state, "uncertain");
+});
+
+test("xAI retains the original integer duration interface for requests 5, 13, and 15", async () => {
+  const requested = [];
+  const client = provider(async (_url, init) => {
+    requested.push(JSON.parse(init.body).duration);
+    return new Response(JSON.stringify({ request_id: `video-${requested.length}` }), { status: 200 });
+  });
+  assert.deepEqual(client.supportedDurations("720p"), Array.from({ length: 15 }, (_, index) => index + 1));
+  for (const duration of [5, 13, 15]) {
+    await client.startVideo({ model: "video", prompt: "move", sourceImage: "data:image/png;base64,AA==", duration, aspectRatio: "16:9", resolution: "720p" });
+  }
+  assert.deepEqual(requested, [5, 13, 15]);
 });

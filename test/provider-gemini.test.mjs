@@ -5,10 +5,11 @@ import path from "node:path";
 import test from "node:test";
 import { safeSerialize } from "../src/io.mjs";
 import { createGeminiProvider } from "../src/providers/gemini.mjs";
+import { createPaidOperationJournal } from "../src/providers/journal.mjs";
 
 const origin = "http://127.0.0.1:45679";
-function provider(fetch) {
-  return createGeminiProvider({ apiKey: "fake-gemini-key", baseUrl: `${origin}/v1beta`, testOrigins: [origin], fetch, sleep: async () => {}, retry: { retries: 0 } });
+function provider(fetch, journal) {
+  return createGeminiProvider({ apiKey: "fake-gemini-key", baseUrl: `${origin}/v1beta`, testOrigins: [origin], fetch, journal, sleep: async () => {}, retry: { retries: 0 } });
 }
 
 test("Gemini normalizes safety filtering and durations/audio capability", async () => {
@@ -71,4 +72,28 @@ test("Gemini start preserves data URI payload and does not retry 5xx POST", asyn
   await assert.rejects(client.startVideo({ model: "veo-model", prompt: "move", sourceImage: "data:image/png;base64,AQ==", duration: 8, aspectRatio: "16:9", resolution: "1080p" }), /uncertain/);
   assert.equal(calls, 1);
   assert.deepEqual(body.instances[0].image, { mimeType: "image/png", bytesBase64Encoded: "AQ==" });
+});
+
+test("Gemini operationKey permits intentional same-body attempts and resumes each accepted job", async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "gemini-video-operations-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  let posts = 0;
+  const bodies = [];
+  const fetch = async (_url, init) => {
+    posts += 1;
+    bodies.push(JSON.parse(init.body));
+    return new Response(JSON.stringify({ name: `operations/job-${posts}` }), { status: 200 });
+  };
+  const request = { model: "veo", prompt: "identical", sourceImage: "data:image/png;base64,AA==", duration: 8, aspectRatio: "16:9", resolution: "1080p" };
+  const first = provider(fetch, createPaidOperationJournal(directory));
+  assert.equal((await first.startVideo({ ...request, operationKey: "scene-9/video/attempt-1" })).operationId, "operations/job-1");
+  assert.equal((await first.startVideo({ ...request, operationKey: "scene-9/video/attempt-2" })).operationId, "operations/job-2");
+  assert.equal(posts, 2);
+  assert.equal("operationKey" in bodies[0], false);
+
+  const restarted = provider(fetch, createPaidOperationJournal(directory));
+  const recovered = await restarted.startVideo({ ...request, operationKey: "scene-9/video/attempt-1" });
+  assert.equal(recovered.operationId, "operations/job-1");
+  assert.equal(recovered.reused, true);
+  assert.equal(posts, 2);
 });

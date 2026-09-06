@@ -1,5 +1,6 @@
 import { download, objectHash, validateRemoteUrl } from "../io.mjs";
 import { createHttpClient, isExplicitCapacityRejection, ProviderHttpError } from "./http.mjs";
+import { PaidOperationResultUnavailableError } from "./journal.mjs";
 
 const DEFAULT_BASE_URL = "https://api.x.ai/v1";
 
@@ -31,6 +32,15 @@ function assistantText(response) {
   const content = response?.choices?.[0]?.message?.content;
   if (typeof content !== "string") throw new Error("Text response did not contain text content");
   return content;
+}
+
+function durableOperationKey(operationKey, workKey) {
+  if (operationKey !== undefined && workKey !== undefined && operationKey !== workKey) {
+    throw new Error("operationKey and workKey must match when both are supplied");
+  }
+  const key = operationKey ?? workKey ?? null;
+  if (key !== null && (typeof key !== "string" || !key.trim())) throw new Error("operationKey must be a non-empty string");
+  return key;
 }
 
 function schemaFormat(schema) {
@@ -94,26 +104,39 @@ export class XaiProvider {
     });
   }
 
-  async #paid(operation, model, body, endpoint, { timeoutMs, validate } = {}) {
-    const submit = async () => this.request(endpoint, {
-      method: "POST", paid: true, body, timeoutMs, validate,
-    });
+  async #paid(operation, model, body, endpoint, { timeoutMs, validate, operationKey = null } = {}) {
+    const asynchronous = operation === "video";
+    const submit = async () => {
+      const payload = await this.request(endpoint, {
+        method: "POST", paid: true, body, timeoutMs,
+      });
+      if (validate && validate(payload) === false) throw new Error("Paid provider response was invalid");
+      return payload;
+    };
     if (!this.journal) return submit();
     const fingerprint = objectHash({ provider: "xai", operation, model, body });
-    const journaled = await this.journal.run({ provider: "xai", operation, model, fingerprint }, async ({ checkpointAccepted }) => {
+    const journaled = await this.journal.run({
+      provider: "xai", operation, model, fingerprint, operationKey,
+      resultMode: asynchronous ? "asynchronous" : "synchronous",
+      resumeAccepted: asynchronous,
+    }, async ({ checkpointAccepted }) => {
       const payload = await submit();
       const metadata = { requestId: requestId(payload), costUsd: responseCost(payload) };
-      if (operation === "video") {
-        await checkpointAccepted({ ...metadata, operationId: payload.request_id ?? payload.id });
-        return { state: "accepted", metadata, result: payload };
+      if (asynchronous) {
+        const operationId = payload.request_id ?? payload.id;
+        await checkpointAccepted({ ...metadata, operationId });
+        return { state: "accepted", metadata: { ...metadata, operationId }, result: payload };
       }
       return { state: "completed", metadata, result: payload };
     });
-    if (journaled.reused) return { _journal: journaled.entry };
+    if (journaled.reused) {
+      if (!asynchronous) throw new PaidOperationResultUnavailableError(journaled.entry);
+      return { _journal: journaled.entry };
+    }
     return journaled.result;
   }
 
-  async #chat({ model, prompt, images = [], schema, operation }) {
+  async #chat({ model, prompt, images = [], schema, operation, operationKey }) {
     const imageContent = images.map((image) => ({ type: "image_url", image_url: { url: image, detail: "high" } }));
     const baseBody = {
       model,
@@ -126,7 +149,14 @@ export class XaiProvider {
       payload = await this.#paid(operation, model, {
         ...baseBody,
         ...(schema ? { response_format: schemaFormat(schema) } : {}),
-      }, "/chat/completions", { timeoutMs: 300_000 });
+      }, "/chat/completions", {
+        timeoutMs: 300_000, operationKey,
+        validate: (response) => {
+          assistantText(response);
+          if (schema) extractAssistantJson(response);
+          return true;
+        },
+      });
     } catch (error) {
       if (!schema || !isUnsupportedResponseFormat(error)) throw error;
       // The provider definitively rejected the unsupported request. The fallback is
@@ -137,7 +167,14 @@ export class XaiProvider {
           { type: "text", text: `${prompt}\n\nReturn only JSON matching this schema:\n${JSON.stringify(schema.value ?? schema)}` },
           ...imageContent,
         ] }],
-      }, "/chat/completions", { timeoutMs: 300_000 });
+      }, "/chat/completions", {
+        timeoutMs: 300_000, operationKey,
+        validate: (response) => {
+          assistantText(response);
+          if (schema) extractAssistantJson(response);
+          return true;
+        },
+      });
     }
     if (payload?._journal) return { reused: true, journal: payload._journal, text: null, json: null, requestId: payload._journal.requestId ?? null, costUsd: payload._journal.costUsd ?? null };
     const text = assistantText(payload);
@@ -149,11 +186,11 @@ export class XaiProvider {
     };
   }
 
-  generateText({ model, prompt, schema }) {
-    return this.#chat({ model, prompt, schema, operation: "text" });
+  generateText({ model, prompt, schema, operationKey, workKey }) {
+    return this.#chat({ model, prompt, schema, operation: "text", operationKey: durableOperationKey(operationKey, workKey) });
   }
 
-  async generateCandidates({ model, prompt, referenceImages = [], count = 1, aspectRatio, resolution, quality }) {
+  async generateCandidates({ model, prompt, referenceImages = [], count = 1, aspectRatio, resolution, quality, operationKey, workKey }) {
     if (!Array.isArray(referenceImages) || referenceImages.length === 0) throw new Error("At least one reference image is required");
     const imageFields = referenceImages.length === 1
       ? { image: { url: referenceImages[0] } }
@@ -161,7 +198,12 @@ export class XaiProvider {
     const payload = await this.#paid("image", model, {
       model, prompt, ...imageFields, n: count, aspect_ratio: aspectRatio,
       resolution, quality, response_format: "b64_json",
-    }, "/images/edits", { timeoutMs: 600_000 });
+    }, "/images/edits", {
+      timeoutMs: 600_000,
+      operationKey: durableOperationKey(operationKey, workKey),
+      validate: (response) => Array.isArray(response?.data) && response.data.length === count &&
+        response.data.every((item) => typeof item?.b64_json === "string" || typeof item?.url === "string"),
+    });
     if (payload?._journal) return { images: [], reused: true, journal: payload._journal, requestId: payload._journal.requestId ?? null, costUsd: payload._journal.costUsd ?? null };
     return {
       images: (payload?.data ?? []).map((image) => ({
@@ -179,17 +221,21 @@ export class XaiProvider {
     return this.generateCandidates({ ...options, referenceImages: options.referenceImages ?? options.references });
   }
 
-  judgeImages({ model, prompt, images, schema }) {
-    return this.#chat({ model, prompt, images, schema, operation: "judge" });
+  judgeImages({ model, prompt, images, schema, operationKey, workKey }) {
+    return this.#chat({ model, prompt, images, schema, operation: "judge", operationKey: durableOperationKey(operationKey, workKey) });
   }
 
-  async startVideo({ model, prompt, sourceImage, duration, aspectRatio, resolution, options = {}, image, generateAudio }) {
+  async startVideo({ model, prompt, sourceImage, duration, aspectRatio, resolution, options = {}, image, generateAudio, operationKey, workKey }) {
     const audio = options.generateAudio ?? generateAudio ?? false;
     const payload = await this.#paid("video", model, {
       model, prompt, image: { url: sourceImage ?? image }, duration,
       aspect_ratio: aspectRatio, resolution, generate_audio: audio,
       ...options.providerParameters,
-    }, "/videos/generations", { timeoutMs: 120_000 });
+    }, "/videos/generations", {
+      timeoutMs: 120_000,
+      operationKey: durableOperationKey(operationKey, workKey),
+      validate: (response) => typeof (response?.request_id ?? response?.id) === "string" && Boolean(response.request_id ?? response.id),
+    });
     if (payload?._journal) {
       return { status: "pending", operationId: payload._journal.operationId, requestId: payload._journal.requestId ?? null, costUsd: payload._journal.costUsd ?? null, reused: true };
     }
@@ -221,7 +267,7 @@ export class XaiProvider {
   }
 
   supportedDurations(_resolution) {
-    return [6, 10];
+    return Array.from({ length: 15 }, (_, index) => index + 1);
   }
 
   supportsAudioControl() {
