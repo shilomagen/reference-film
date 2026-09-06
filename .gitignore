@@ -10,6 +10,26 @@ projects/
 outputs/
 examples/assets/
 
+# Private workspaces, local projects, paid checkpoints, and export staging
+.fullcycle/
+projects/
+checkpoints/
+paid-checkpoints/
+.checkpoints/
+export/
+.export/
+exports/
+.exports/
+export-staging/
+source-media/
+artifacts/
+*.project.local.json
+*.local.project.json
+*.local.config.json
+*.project.override.json
+project.config.local.json
+project.config.override.json
+
 # Private/source media should be explicitly opted in by users
 *.mp3
 *.wav
