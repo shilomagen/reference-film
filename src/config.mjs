@@ -97,11 +97,11 @@ export function parseArgs(argv = process.argv.slice(2), { cwd = process.cwd() } 
 export function parseEnvFile(filePath) {
   const result = {};
   const content = fs.readFileSync(filePath, "utf8");
-  for (const raw of content.split(/\r?\n/)) {
+  for (const [index, raw] of content.split(/\r?\n/).entries()) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const match = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
-    if (!match) throw new Error(`Invalid environment line in ${filePath}: ${raw}`);
+    if (!match) throw new Error(`Invalid environment line in ${filePath}:${index + 1}`);
     let value = match[2].trim();
     if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
     else value = value.replace(/\s+#.*$/, "").trim();

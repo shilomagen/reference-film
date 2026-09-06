@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_CONFIG_PATH, HELP, loadConfig, loadPlan, loadProject, parseArgs } from "../src/config.mjs";
+import { DEFAULT_CONFIG_PATH, HELP, loadConfig, loadPlan, loadProject, parseArgs, parseEnvFile } from "../src/config.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -81,6 +81,19 @@ test("environment is explicit, aliases work, model overrides are project scoped,
   assert.equal(JSON.stringify(config).includes("test-secret"), false);
   assert.equal(JSON.stringify(config).includes("gemini-secret"), false);
   fs.rmSync(directory, { recursive: true });
+});
+
+test("environment parse errors report location without exposing invalid line contents", (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reference-film-env-"));
+  t.after(() => fs.rmSync(directory, { recursive: true }));
+  const envPath = path.join(directory, "secrets.env");
+  const sentinel = "SENTINEL_PRIVATE_VALUE_001";
+  fs.writeFileSync(envPath, `VALID=value\n# comment\ninvalid ${sentinel}\n`);
+  assert.throws(() => parseEnvFile(envPath), (error) => {
+    assert.match(error.message, new RegExp(`${envPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:3$`));
+    assert.equal(error.message.includes(sentinel), false);
+    return true;
+  });
 });
 
 test("loadPlan returns selected scenes and immutable full-plan ordering semantics", () => {
