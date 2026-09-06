@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reference-film.local/schemas/timings.schema.json",
+  "title": "Scene duration overrides",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["timings"],
+  "properties": {
+    "timings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["scene_id", "duration_seconds"],
+        "properties": {
+          "scene_id": { "type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$" },
+          "duration_seconds": { "type": "number", "exclusiveMinimum": 0, "maximum": 3600 }
+        }
+      }
+    }
+  }
+}

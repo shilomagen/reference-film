@@ -1,0 +1,16 @@
+{
+  "project_slug": "example-film",
+  "creative_intent": "Follow two fictional makers as they carry a handmade light through a quiet evening.",
+  "audience": "A general audience viewing a short workflow demonstration.",
+  "visual_direction": "Warm, handmade, hopeful, and easy to read without dialogue.",
+  "constraints": [
+    "Use only synthetic reference media.",
+    "Avoid logos, visible text, and imitation of a named artist."
+  ],
+  "approvals": {
+    "reference_rights_confirmed": true,
+    "music_rights_confirmed": true,
+    "source_hashes": {}
+  },
+  "notes_markdown": "Creator notes may be maintained here or in a neighboring local Markdown file. Source hashes are reserved for later approval checkpoints."
+}

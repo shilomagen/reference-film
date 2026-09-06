@@ -1,0 +1,8 @@
+{
+  "timings": [
+    { "scene_id": "solo_portrait", "duration_seconds": 4 },
+    { "scene_id": "shared_workbench", "duration_seconds": 5 },
+    { "scene_id": "lantern_run", "duration_seconds": 5 },
+    { "scene_id": "memory_group", "duration_seconds": 4 }
+  ]
+}
