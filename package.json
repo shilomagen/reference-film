@@ -1,0 +1,27 @@
+{
+  "name": "reference-film",
+  "version": "0.0.1",
+  "description": "Local-first contracts and offline CLI for reference-driven films",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "files": [
+    "README.md",
+    "src/*.mjs",
+    "schemas/*.json",
+    "examples/*.json",
+    "examples/*.md",
+    "scripts/*.mjs",
+    ".env.example"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node scripts/example-assets.mjs && node --test",
+    "check": "node scripts/check-syntax.mjs",
+    "example:assets": "node scripts/example-assets.mjs",
+    "validate": "node src/cli.mjs validate",
+    "dry-run": "node src/cli.mjs run --dry-run"
+  }
+}

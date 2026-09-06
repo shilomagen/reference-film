@@ -1,0 +1,94 @@
+{
+  "video": {
+    "title": "The Lantern Walk",
+    "description": "Four synthetic scenes demonstrating core plan modes.",
+    "scenes": [
+      {
+        "scene_id": "solo_portrait",
+        "section": "verse",
+        "lyrics": "A little light waits by the door",
+        "lyric_ids": ["verse_01_line_01"],
+        "duration_seconds": 4,
+        "lock_duration": false,
+        "characters": ["traveler"],
+        "image_generation": {
+          "prompt": "A medium portrait of the traveler beside a paper lantern at a simple workshop door, face clear, warm dusk light.",
+          "negative_prompt": "No extra people, duplicate features, visible words, logos, or obscured face.",
+          "aspect_ratio": "16:9"
+        },
+        "video_generation": {
+          "scene_description": "The traveler notices the lantern beginning to glow.",
+          "prompt": "Preserve face, clothing, setting, and composition while the lantern gently brightens.",
+          "camera": "Very slow push in.",
+          "motion": "A small breath, natural blink, and subtle lantern flicker.",
+          "ending_frame": "The traveler looks toward the path, lantern steady."
+        }
+      },
+      {
+        "scene_id": "shared_workbench",
+        "section": "verse",
+        "lyrics": "Two steady hands can carry it farther",
+        "lyric_ids": ["verse_01_line_02"],
+        "duration_seconds": 5,
+        "lock_duration": false,
+        "characters": ["traveler", "maker"],
+        "image_generation": {
+          "prompt": "The traveler and maker stand on opposite sides of a wooden workbench, both faces unobstructed, finishing one paper lantern together.",
+          "negative_prompt": "No blended identities, duplicated people, hidden hands, logos, or visible writing.",
+          "aspect_ratio": "16:9"
+        },
+        "video_generation": {
+          "scene_description": "The pair lift the completed lantern from the bench.",
+          "prompt": "Keep both identities and roles exact as they carefully lift one lantern together.",
+          "camera": "Locked waist-height composition.",
+          "motion": "Restrained coordinated hand movement and soft paper movement.",
+          "ending_frame": "Both hold the lantern between them and smile."
+        }
+      },
+      {
+        "scene_id": "lantern_run",
+        "section": "chorus",
+        "lyrics": "Step into the evening glow",
+        "lyric_ids": ["chorus_01_line_01"],
+        "duration_seconds": 5,
+        "lock_duration": false,
+        "characters": ["traveler"],
+        "image_generation": {
+          "prompt": "Wide side view of the traveler jogging along a safe garden path with the lantern, face readable, coat moving in the breeze.",
+          "negative_prompt": "No vehicles, crowds, text, warped limbs, duplicate person, or changed clothing.",
+          "aspect_ratio": "16:9"
+        },
+        "video_generation": {
+          "scene_description": "The traveler moves briskly down the garden path.",
+          "prompt": "Maintain exact identity and anatomy during a short controlled jog with the lantern held securely.",
+          "camera": "Smooth lateral tracking.",
+          "motion": "Two natural running steps, coat and leaves moving lightly.",
+          "ending_frame": "The traveler slows near a garden arch."
+        }
+      },
+      {
+        "scene_id": "memory_group",
+        "section": "chorus",
+        "lyrics": "Make a bright path as we go",
+        "lyric_ids": ["chorus_01_line_02"],
+        "duration_seconds": 4,
+        "lock_duration": true,
+        "characters": ["traveler", "maker"],
+        "source_image": "assets/group-reference.png",
+        "source_image_mode": "direct_animation",
+        "image_generation": {
+          "prompt": "Fit the supplied synthetic group portrait into a 16:9 frame without changing either fictional person.",
+          "negative_prompt": "No new people, identity changes, recomposition, text, or clothing changes.",
+          "aspect_ratio": "16:9"
+        },
+        "video_generation": {
+          "scene_description": "Gently animate the existing synthetic group portrait.",
+          "prompt": "Preserve every pixel-level identity and composition cue; add only subtle natural motion.",
+          "camera": "Locked camera with an almost imperceptible push.",
+          "motion": "Natural blinks and a slight lantern flicker only.",
+          "ending_frame": "The original group composition remains intact."
+        }
+      }
+    ]
+  }
+}

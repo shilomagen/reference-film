@@ -1,0 +1,32 @@
+{
+  "metadata": {
+    "slug": "example-film",
+    "title": "The Lantern Walk",
+    "description": "A wholly synthetic demonstration project."
+  },
+  "visualStyle": "Warm dusk light, tactile paper textures, grounded cinematic framing, gentle contrast, and no visible text.",
+  "characters": {
+    "traveler": { "description": "An adult fictional traveler in a teal coat and knitted cap." },
+    "maker": { "description": "An adult fictional lantern maker in a rust jacket and round spectacles." }
+  },
+  "inputs": {
+    "plan": "scene-plan.json",
+    "brief": "creator-brief.json",
+    "lyrics": "lyrics.json",
+    "timings": "timings.json",
+    "faces": {
+      "traveler": ["assets/traveler-primary.png", "assets/traveler-profile.png"],
+      "maker": "assets/maker-primary.png"
+    },
+    "audioCandidates": ["assets/example-tone.wav"]
+  },
+  "outputs": "../.generated/example-film",
+  "providers": { "text": "xai", "image": "xai", "judge": "xai", "video": "xai" },
+  "models": {
+    "text": "example-text-model",
+    "image": "example-image-model",
+    "judge": "example-judge-model",
+    "video": "example-video-model",
+    "geminiVideo": "example-gemini-video-model"
+  }
+}

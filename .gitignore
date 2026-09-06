@@ -1,0 +1,30 @@
+node_modules/
+.env
+.env.*
+!.env.example
+
+# Project-generated artifacts and synthetic example media
+.generated/
+outputs/
+examples/assets/
+
+# Private/source media should be explicitly opted in by users
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.aac
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.jpg
+*.jpeg
+*.png
+*.webp
+*.gif
+
+.DS_Store
+coverage/
+*.log

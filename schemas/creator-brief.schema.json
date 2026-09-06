@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reference-film.local/schemas/creator-brief.schema.json",
+  "title": "Creator brief",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["project_slug", "creative_intent", "audience", "visual_direction", "constraints", "approvals"],
+  "properties": {
+    "project_slug": { "type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$" },
+    "creative_intent": { "type": "string", "minLength": 1 },
+    "audience": { "type": "string", "minLength": 1 },
+    "visual_direction": { "type": "string", "minLength": 1 },
+    "constraints": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "approvals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference_rights_confirmed", "music_rights_confirmed"],
+      "properties": {
+        "reference_rights_confirmed": { "type": "boolean" },
+        "music_rights_confirmed": { "type": "boolean" },
+        "source_hashes": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[a-f0-9]{64}$" } }
+      }
+    },
+    "notes_markdown": { "type": "string" }
+  }
+}
