@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import { collectPublicFiles, exportPublicSource } from "../scripts/export.mjs";
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const MIT_LICENSE_BYTES = 1069;
-const MIT_LICENSE_SHA256 = "bc4fed2333e93e719a3b2aa84b45f3326131ed2ef0e74817ee02f2bb5823795f";
+const MIT_LICENSE_BYTES = 1068;
+const MIT_LICENSE_SHA256 = "77a12817ae0d70aa2f603dfa574cdcb2d0ebd9f4a44a6ef49d9311cb2f196458";
 
 function temporaryDirectory(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reference-film-export-test-"));
